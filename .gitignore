@@ -1,0 +1,28 @@
+# Build outputs
+build/
+devel/
+install/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ROS
+*.bag
+*.active
+
+# Sensitive - API keys, local configs
+*.local.md
+src/abot_vlm/scripts/API_KEY*.py

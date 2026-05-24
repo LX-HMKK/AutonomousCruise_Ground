@@ -7,7 +7,6 @@ import rospy
 import time
 import json
 import threading
-from enum import Enum
 
 from std_msgs.msg import String, Empty
 from geometry_msgs.msg import PoseStamped, Twist
@@ -25,31 +24,53 @@ from config_loader import load_config, get_cell_center_xy
 from mission_logger import MissionLogger
 
 
-class MissionState(Enum):
-    IDLE = 'IDLE'
-    WAIT_FOR_WAKEUP = 'WAIT_FOR_WAKEUP'
-    START_ANNOUNCE = 'START_ANNOUNCE'
-    SEARCH_TASK_IMAGE = 'SEARCH_TASK_IMAGE_{}'   # format with 1-4
-    RECOGNIZE_TASK_IMAGE = 'RECOGNIZE_TASK_IMAGE_{}'
-    NAVIGATE_TO_TASK = 'NAVIGATE_TO_TASK_{}'
-    ARRIVE_TASK = 'ARRIVE_TASK_{}'
-    ANNOUNCE_TASK = 'ANNOUNCE_TASK_{}'
-    NAVIGATE_TO_FINISH = 'NAVIGATE_TO_FINISH'
-    ARRIVE_FINISH = 'ARRIVE_FINISH'
-    FINISH_ANNOUNCE = 'FINISH_ANNOUNCE'
-    DONE = 'DONE'
-    # 异常状态
-    ABORT_COLLISION_RISK = 'ABORT_COLLISION_RISK'
-    ABORT_TIMEOUT = 'ABORT_TIMEOUT'
-    ABORT_LOCALIZATION_LOST = 'ABORT_LOCALIZATION_LOST'
-    ABORT_PERCEPTION_FAILED = 'ABORT_PERCEPTION_FAILED'
-    ABORT_NAVIGATION_FAILED = 'ABORT_NAVIGATION_FAILED'
-    MANUAL_STOP_REQUESTED = 'MANUAL_STOP_REQUESTED'
+class MissionState(object):
+    """Python 2 兼容的任务状态。支持 == 比较、.value 访问、set 成员。"""
 
-    @classmethod
-    def task_image_state(cls, phase, step_name):
-        """构建带序号的阶段状态，如 SEARCH_TASK_IMAGE_1"""
-        return cls('{}_{}'.format(step_name, phase))
+    def __init__(self, value):
+        self.value = value
+
+    def __eq__(self, other):
+        if isinstance(other, MissionState):
+            return self.value == other.value
+        return NotImplemented
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
+
+    def __hash__(self):
+        return hash(self.value)
+
+    def __repr__(self):
+        return 'MissionState(%r)' % self.value
+
+
+# 正常状态实例
+MissionState.IDLE = MissionState('IDLE')
+MissionState.WAIT_FOR_WAKEUP = MissionState('WAIT_FOR_WAKEUP')
+MissionState.START_ANNOUNCE = MissionState('START_ANNOUNCE')
+MissionState.NAVIGATE_TO_FINISH = MissionState('NAVIGATE_TO_FINISH')
+MissionState.ARRIVE_FINISH = MissionState('ARRIVE_FINISH')
+MissionState.FINISH_ANNOUNCE = MissionState('FINISH_ANNOUNCE')
+MissionState.DONE = MissionState('DONE')
+# 异常状态实例
+MissionState.ABORT_COLLISION_RISK = MissionState('ABORT_COLLISION_RISK')
+MissionState.ABORT_TIMEOUT = MissionState('ABORT_TIMEOUT')
+MissionState.ABORT_LOCALIZATION_LOST = MissionState('ABORT_LOCALIZATION_LOST')
+MissionState.ABORT_PERCEPTION_FAILED = MissionState('ABORT_PERCEPTION_FAILED')
+MissionState.ABORT_NAVIGATION_FAILED = MissionState('ABORT_NAVIGATION_FAILED')
+MissionState.MANUAL_STOP_REQUESTED = MissionState('MANUAL_STOP_REQUESTED')
+
+
+def _task_image_state(cls, phase, step_name):
+    """构建带序号的阶段状态，如 SEARCH_TASK_IMAGE_1"""
+    return MissionState('{}_{}'.format(step_name, phase))
+
+
+MissionState.task_image_state = classmethod(_task_image_state)
 
 
 class MissionStateMachine(object):
