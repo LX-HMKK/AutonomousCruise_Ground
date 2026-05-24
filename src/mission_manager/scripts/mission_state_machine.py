@@ -107,6 +107,8 @@ class MissionStateMachine(object):
         self.perception_retry_count = 0
         self.navigation_retry_count = 0
         self.recognition_in_progress = False
+        self.rotation_attempt = 0
+        self.seen_image_ids = []  # 已识别的图像 ID，防止重复
 
         # ROS 接口
         self.move_base_client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
@@ -197,21 +199,41 @@ class MissionStateMachine(object):
             result = json.loads(msg.data)
             confidence = result.get('confidence', 0)
             min_conf = self.mission_cfg['confidence']['min_confidence']
+            image_id = result.get('image_id', '')
 
-            rospy.loginfo('[Mission] Vision result: cell=%s, confidence=%.2f',
-                          result.get('target_cell'), confidence)
+            rospy.loginfo('[Mission] Vision result: cell=%s, confidence=%.2f, id=%s',
+                          result.get('target_cell'), confidence, image_id)
+
+            # 检查是否已识别过同一张图像
+            phase = self.task_index + 1
+            if image_id and image_id in self.seen_image_ids:
+                rospy.logwarn('[Mission] Phase %d: Image %s already recognized! Rotating...',
+                              phase, image_id)
+                self.rotation_attempt += 1
+                if self.rotation_attempt < 4:
+                    self._search_rotation(phase)
+                else:
+                    self._retry_perception(phase)
+                return
 
             if confidence >= min_conf:
                 self.target_cell = result['target_cell']
+                if image_id:
+                    self.seen_image_ids.append(image_id)
                 self.logger.log_perception(result)
                 self.perception_retry_count = 0
+                self.rotation_attempt = 0
                 self.recognition_in_progress = False
                 self.vision_result = result
                 self.vision_result_event.set()
             else:
-                rospy.logwarn('[Mission] Low confidence %.2f < %.2f, retrying...',
+                rospy.logwarn('[Mission] Low confidence %.2f < %.2f',
                               confidence, min_conf)
-                self._retry_perception()
+                self.rotation_attempt += 1
+                if self.rotation_attempt < 4:
+                    self._search_rotation(phase)
+                else:
+                    self._retry_perception(phase)
         except (ValueError, KeyError, TypeError) as e:
             rospy.logerr('[Mission] Invalid vision result: %s', str(e))
 
@@ -284,30 +306,79 @@ class MissionStateMachine(object):
         elif current_step == 'ANNOUNCE_TASK':
             self._handle_announce_task(phase)
 
+    def _search_rotation(self, phase):
+        """旋转机器人扫描围栏不同方向，寻找任务图像。
+
+        每旋转 90 度触发一次相机，最多 4 次（360 度）。
+        找到图像后自动跳转 RECOGNIZE 状态。
+        """
+        self._stop_robot()
+        rospy.sleep(0.5)
+
+        # 旋转 90 度 (约 2 秒，角速度 0.78 rad/s)
+        twist = Twist()
+        twist.angular.z = 0.78
+        start_yaw = self._get_current_pose()[2] if self._get_current_pose()[2] is not None else 0.0
+
+        rospy.loginfo('[Mission] Phase %d: Rotating to scan fence (attempt %d/4)...',
+                      phase, self.rotation_attempt + 1)
+
+        # 发布旋转指令
+        end_time = rospy.Time.now() + rospy.Duration(2.0)
+        while rospy.Time.now() < end_time and not rospy.is_shutdown():
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
+            # 如果识别线程已经得到结果，提前停止旋转
+            if self.vision_result_event.is_set() and not self.recognition_in_progress:
+                break
+
+        # 停止旋转
+        self._stop_robot()
+        rospy.sleep(0.5)
+
+        # 触发相机拍照
+        rospy.set_param('/top_view_shot_node/im_flag', 1)
+        rospy.loginfo('[Mission] Phase %d: Camera triggered at orientation %d/4',
+                      phase, self.rotation_attempt + 1)
+
+        self.recognition_in_progress = True
+        self.vision_result_event.clear()
+
+        # 等待识别结果（在 _handle_recognize_task_image 中处理超时）
+        self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
+
     def _handle_search_task_image(self, phase):
         text = self.voice_cfg['voice_text']['task_image_searching'].format(index=phase)
         self._speak(text)
         rospy.loginfo('[Mission] Phase %d: Searching for task image...', phase)
 
-        # 触发相机：设置 im_flag 参数让 VLM 拍照
-        rospy.set_param('/top_view_shot_node/im_flag', 1)
-        rospy.sleep(1.0)
-
-        self.recognition_in_progress = True
-        self.vision_result_event.clear()
-        self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
+        self.perception_retry_count = 0
+        self.rotation_attempt = 0
+        self._search_rotation(phase)
 
     def _handle_recognize_task_image(self, phase):
-        timeout = 15.0
+        timeout = 10.0  # 每个方向等 10 秒
         detected = self.vision_result_event.wait(timeout=timeout)
 
         if not detected or self.recognition_in_progress:
-            rospy.logwarn('[Mission] Phase %d: Recognition timeout after %.1fs', phase, timeout)
-            self._retry_perception()
-            return
+            rospy.logwarn('[Mission] Phase %d: No recognition at rotation %d/4',
+                          phase, self.rotation_attempt + 1)
+
+            self.rotation_attempt += 1
+            if self.rotation_attempt < 4:
+                # 旋转到下一个方向继续搜索
+                rospy.loginfo('[Mission] Phase %d: Rotating to next direction...', phase)
+                self._search_rotation(phase)
+                return
+            else:
+                # 4 个方向都扫过了，触发重试
+                rospy.logwarn('[Mission] Phase %d: All 4 orientations scanned, retrying...', phase)
+                self._retry_perception(phase)
+                return
 
         rospy.loginfo('[Mission] Phase %d: Recognition successful, target cell=%d',
                       phase, self.target_cell)
+        self.rotation_attempt = 0
         self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_TASK'))
 
     def _handle_navigate_to_task(self, phase):
@@ -480,19 +551,21 @@ class MissionStateMachine(object):
             rospy.logwarn('[Mission] State timeout in %s: %.1fs > %ds',
                           self.state.value, state_elapsed, max_state_time)
 
-    def _retry_perception(self):
-        """处理识别重试。"""
+    def _retry_perception(self, phase):
+        """处理识别重试：重置旋转计数器，从头开始搜索。"""
         max_retries = self.mission_cfg['timeouts']['perception_retry_limit']
         self.perception_retry_count += 1
         if self.perception_retry_count > max_retries:
             rospy.logerr('[Mission] Max perception retries (%d) exceeded', max_retries)
             self.transition(MissionState.ABORT_PERCEPTION_FAILED)
             return
-        rospy.loginfo('[Mission] Perception retry %d/%d', self.perception_retry_count, max_retries)
-        self.recognition_in_progress = True
+        rospy.loginfo('[Mission] Perception retry %d/%d, restarting rotation search',
+                      self.perception_retry_count, max_retries)
+        self.rotation_attempt = 0
+        self.recognition_in_progress = False
         self.vision_result_event.clear()
-        # 重新触发相机
-        rospy.set_param('/top_view_shot_node/im_flag', 1)
+        # 回到搜索状态，从第一个方向重新开始
+        self.transition(MissionState.task_image_state(phase, 'SEARCH_TASK_IMAGE'))
 
 
 if __name__ == '__main__':
