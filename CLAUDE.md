@@ -112,11 +112,88 @@ docs(config): 补充比赛场地配置文件说明
 │   └── imu_filter/             # IMU 姿态滤波器（Madgwick/Mahony）
 ├── launch/
 │   └── ground_cruise.launch    # 比赛统一启动入口（唤醒+导航+VLM+状态机+安全）
-├── scripts/                    # 远端 ABOT 启动脚本（参考，不在本机使用）
+├── scripts/
+│   ├── mapping.sh              # 模式一：键盘控制建图（8 个节点）
+│   ├── navigation_test.sh      # 模式二：预设路径导航（10 个节点）
+│   ├── competition.sh          # 模式三：完整比赛（14 个节点）
+│   └── *.sh                    # 其他：远端 ABOT 启动脚本（参考）
 ├── tests/                      # 单元测试与仿真测试（待建）
 ├── logs/                       # 运行日志（按 run_YYYYMMDD_HHMMSS 组织，gitignore）
 └── docs/                       # 需求文档 + 实现计划 + 比赛素材
 ```
+
+### 三种运行模式与节点架构
+
+#### 模式一：键盘控制建图 (`scripts/mapping.sh`)
+
+**8 个节点**，手动操控机器人扫图，SLAM 实时构建地图。
+
+```
+roscore
+ ├── abot_driver           # 底盘串口驱动 → /odom, TF
+ ├── abot_imu              # IMU 数据 → /imu
+ ├── rplidar               # 激光雷达 → /scan
+ ├── box_filter            # 过滤自身点云 → /scan_filtered
+ ├── robot_state_publisher # URDF → TF (base_link→laser_link)
+ ├── slam_gmapping         # 实时 SLAM → /map
+ ├── teleop_keyboard       # 键盘遥控 → /cmd_vel
+ └── rviz (可选)           # 可视化建图过程
+```
+
+启动：`./scripts/mapping.sh [地图名]`
+
+#### 模式二：预设路径导航 (`scripts/navigation_test.sh`)
+
+**10 个节点**，加载先验地图，按预设路径点顺序导航，验证导航精度。
+
+```
+roscore
+ ├── abot_driver           # 底盘驱动 → /odom
+ ├── abot_imu              # IMU → /imu
+ ├── rplidar               # 激光雷达 → /scan
+ ├── box_filter            # 激光滤波 → /scan_filtered
+ ├── robot_state_publisher # TF 发布
+ ├── robot_pose_ekf        # 里程计+IMU 融合 → /odom_combined
+ ├── map_server            # 加载 .pgm 先验地图 → /map
+ ├── amcl                  # 粒子滤波定位 → /amcl_pose
+ ├── move_base             # 全局规划 + DWA 局部规划 + costmap
+ └── multi_goals.py        # 顺序发送预设路径点 → move_base action
+```
+
+启动：`./scripts/navigation_test.sh [地图名] [路径脚本]`
+
+#### 模式三：完整比赛 (`scripts/competition.sh`)
+
+**14 个节点**，运行地面巡航完整比赛链路。
+
+```
+roscore
+ ├── abot_driver           # 底盘驱动
+ ├── abot_imu              # IMU
+ ├── rplidar               # 激光雷达
+ ├── box_filter            # 激光滤波
+ ├── robot_state_publisher # TF 发布
+ ├── robot_pose_ekf        # 里程计融合
+ ├── map_server            # 先验地图 → /map
+ ├── cartographer_node     # Cartographer 定位 (主)
+ ├── amcl                  # AMCL 定位 (备)
+ ├── move_base             # 导航规划 (GlobalPlanner + DWA)
+ ├── game_node             # Snowboy 唤醒词检测 → /start
+ ├── vlm_node              # 豆包 VLM 图像识别 → /vision_result
+ ├── mission_state_machine # 任务状态机 (核心串联)
+ └── safety_monitor        # 安全监控 + 碰撞检测 + watchdog
+```
+
+数据流：
+```
+game_node ──/start──→ mission_state_machine
+vlm_node  ──/vision_result──→ mission_state_machine
+mission_state_machine ──move_base action──→ 导航
+mission_state_machine ──/voiceWords──→ TTS 播报
+safety_monitor ──/safety_status──→ mission_state_machine
+```
+
+启动：`./scripts/competition.sh [地图名] [sim_mode]
 
 ### 核心模块职责与数据流
 
