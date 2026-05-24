@@ -1,0 +1,6 @@
+<launch>
+    <node name="top_view_shot_node" pkg="abot_vlm" type="vlm_node.py" output="screen">
+        <param name="im_flag" type="int" value="255" />
+        <!--节点特定的参数，仅在该节点内有效。-->
+    </node>
+</launch>

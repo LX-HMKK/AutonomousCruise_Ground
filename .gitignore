@@ -11,6 +11,10 @@ __pycache__/
 # Logs
 logs/
 
+# Large model/bin files (keep locally, don't commit)
+src/robot_slam/scripts/paraformer-zh/
+src/robot_slam/resources/_snowboydetect.so
+
 # IDE
 .vscode/
 .idea/
