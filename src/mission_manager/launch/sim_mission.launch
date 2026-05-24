@@ -1,0 +1,18 @@
+<launch>
+  <!-- 比赛系统仿真启动文件：加载配置 + 启动状态机 + 安全监控 -->
+  <arg name="sim_mode" default="true"/>
+  <arg name="config_dir" default="$(find mission_manager)/../../config"/>
+
+  <rosparam command="load" file="$(arg config_dir)/competition_field.yaml" ns="competition_field"/>
+  <rosparam command="load" file="$(arg config_dir)/mission.yaml" ns="mission"/>
+  <rosparam command="load" file="$(arg config_dir)/robot.yaml" ns="robot"/>
+  <rosparam command="load" file="$(arg config_dir)/navigation.yaml" ns="navigation"/>
+  <rosparam command="load" file="$(arg config_dir)/perception.yaml" ns="perception"/>
+  <rosparam command="load" file="$(arg config_dir)/voice_text.yaml" ns="voice_text"/>
+
+  <node pkg="mission_manager" type="mission_state_machine.py" name="mission_state_machine" output="screen">
+    <param name="sim_mode" value="$(arg sim_mode)"/>
+  </node>
+
+  <node pkg="mission_manager" type="safety_monitor.py" name="safety_monitor" output="screen"/>
+</launch>
