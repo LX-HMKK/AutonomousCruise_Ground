@@ -1,0 +1,48 @@
+# config/navigation.yaml
+# 导航模块参数：costmap、全局规划器、局部规划器、到点判定
+
+global_costmap:
+  width_m: 4.0
+  height_m: 4.0
+  resolution_m: 0.02
+  inflation_radius_m: 0.22
+  cost_scaling_factor: 10.0
+  obstacle_range_m: 1.5
+  raytrace_range_m: 2.5
+  update_frequency: 2.0
+  publish_frequency: 1.0
+
+local_costmap:
+  width_m: 2.0
+  height_m: 2.0
+  resolution_m: 0.02
+  rolling_window: true
+  inflation_radius_m: 0.1
+  cost_scaling_factor: 3.0
+  update_frequency: 5.0
+  publish_frequency: 2.0
+
+global_planner:
+  type: "GlobalPlanner"
+  allow_unknown: true
+  default_tolerance: 0.1
+  use_dijkstra: true
+
+local_planner:
+  type: "DWAPlannerROS"
+  max_vel_x: 0.55
+  min_vel_x: -0.20
+  max_vel_y: 0.20
+  min_vel_y: -0.20
+  max_vel_theta: 1.4
+  min_vel_theta: 0.8
+  acc_lim_x: 2.5
+  acc_lim_y: 2.5
+  acc_lim_theta: 3.0
+  xy_goal_tolerance: 0.03
+  yaw_goal_tolerance: 0.02
+  sim_time: 1.7
+  holonomic_robot: true
+  oscillation_reset_dist: 0.05
+
+fence_safety_margin_m: 0.15
