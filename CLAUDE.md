@@ -8,15 +8,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 详细需求见 `docs/PROJECT_REQUIREMENTS_GROUND_CRUISE.md`。
 
+## 开发环境
+
+### 本机开发（主要）
+
+- **环境**：Windows WSL Ubuntu 18.04，ROS Melodic，catkin 工作空间
+- **仿真方式**：先验地图模拟导航，mock 数据模拟图像/语音
+- 所有修改优先在本机 `abot_ws/` 完成并验证
+
+### 远端验证（临时）
+
+远端 ABOT 设备为赛场公用设备。代码仅在使用时段临时部署。
+
+- **远端信息**：`abot@172.16.24.173`，见 memory `[[abot-device]]`
+- **部署时机**：用户明确指示需要远端验证时，`scp` 推送变更文件到远端编译运行
+- **代码保护规则**：用户说出 **"我的远端使用时间结束"** 时，你**必须**执行：
+  1. 将远端 `~/abot_ws/src/` 下所有本次修改的文件 `scp` 回本机 `abot_ws/src/`
+  2. 将远端 `~/abot_ws/src/` 恢复到原始状态（删除新增文件，还原修改文件）
+  3. 删除远端 home 目录下本次新增的脚本
+  4. 确认代码不留存后告知用户
+- **禁止行为**：未经用户指示，不得主动向远端推送代码；不得在远端保留任何本次开发的代码或配置
+
 ## 构建与开发命令
 
-> 项目当前处于初始化阶段，以下命令待代码框架搭建后补充。
-
-- 启动比赛流程（预期）：
-  - ROS 2: `ros2 launch <project> ground_cruise.launch.py`
-  - 非 ROS: `python scripts/run_ground_cruise.py --config config/mission.yaml`
-- 运行测试（预期）：`pytest tests/` 或 `colcon test`
-- 运行单个测试（预期）：`pytest tests/<test_file>.py::<test_name>`
+- 编译工作空间：`cd abot_ws && catkin_make`
+- 单独编译某包：`catkin_make --pkg <package_name>`
+- 运行测试：`catkin_make run_tests`
+- 运行单个测试：`catkin_make run_tests --pkg <package_name>`
+- Source 环境：`source abot_ws/devel/setup.bash`
+- 启动仿真任务（M1 起可用）：
+  ```bash
+  source abot_ws/devel/setup.bash
+  roslaunch mission_manager sim_mission.launch
+  ```
 
 ## Git 提交规范
 
@@ -65,7 +89,7 @@ docs(config): 补充比赛场地配置文件说明
 │   ├── voice_io/               # 语音交互（唤醒、播报，播报时机器人必须静止）
 │   ├── safety/                 # 安全保护（watchdog、heartbeat、碰撞检测、超时监控）
 │   └── common/                 # 公共工具（日志、配置加载、数据类型定义）
-├── launch/                     # ROS 2 launch 文件（如适用）
+├── launch/                     # ROS Melodic launch 文件（如适用）
 ├── scripts/                    # 启动脚本与工具
 ├── tests/                      # 单元测试与仿真测试
 ├── logs/                       # 运行日志（按 run_YYYYMMDD_HHMMSS 组织）
