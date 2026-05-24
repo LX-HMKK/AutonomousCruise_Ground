@@ -71,7 +71,9 @@
 
 | 文件 | 职责 |
 |---|---|
-| `scripts/mission_state_machine.py` | 完整状态机：IDLE → WAIT_FOR_WAKEUP → START_ANNOUNCE → SEARCH/RECOGNIZE/NAVIGATE/ARRIVE/ANNOUNCE × 4 → NAVIGATE_TO_FINISH → FINISH_ANNOUNCE → DONE。6 个异常状态（碰撞/超时/定位丢失/感知失败/导航失败/手动停止）。通过 move_base actionlib 发送导航目标，订阅 `/vision_result` 接收识别结果，发布 `/voiceWords` 播报。 |
+| `scripts/mission_state_machine.py` | 完整状态机：IDLE → WAIT_FOR_WAKEUP → START_ANNOUNCE → SEARCH/RECOGNIZE/NAVIGATE/ARRIVE/ANNOUNCE × 4 → NAVIGATE_TO_FINISH → FINISH_ANNOUNCE → DONE。6 个异常状态。旋转搜索（4方向×90°扫描围栏）、footprint 区域判定、图像去重、感知重试。by move_base actionlib 导航，订阅 `/vision_result` 识别，发布 `/voiceWords` 播报。 |
+| `scripts/mock_vlm.py` | Mock VLM 仿真节点：监控 `im_flag` 参数上升沿，按预设序列发布 JSON 识别结果到 `/vision_result`，支持 WSL 无摄像头测试。 |
+| `scripts/safety_monitor.py` | 安全监控：激光碰撞检测 + 里程计运动监控 + heartbeat watchdog + 急停。 |
 | `scripts/safety_monitor.py` | 安全监控节点：激光雷达碰撞检测（< 0.10m 急停）、里程计运动监控、heartbeat watchdog（5s 超时）、急停发布 `/safety_status`。 |
 
 #### common（新建，Python）
@@ -167,7 +169,7 @@ roslaunch launch/ground_cruise.launch sim_mode:=false map_name:=my_lab
 | M0 | 规则建模与仓库整理 | ✅ 完成 |
 | M1 | 配置系统 + 状态机骨架 + 安全监控 | ✅ 完成 |
 | M2 | 导航参数调优 + 精准到点判定 | ✅ 完成 |
-| M3 | 任务图像识别完善（重试逻辑、低置信度处理） | ⬜ 待开发 |
+| M3 | 任务图像识别完善（旋转搜索、mock VLM、去重） | ✅ 完成 |
 | M4 | 语音播报完善（播报完成回调、蓝牙耳机） | ⬜ 待开发 |
 | M5 | 完整任务链路联调 | ⬜ 待开发 |
 | M6 | 鲁棒性测试（随机挡板、异常恢复） | ⬜ 待开发 |

@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### M3 — 任务图像识别完善 (2026-05-24)
+
+#### Added
+
+- `_search_rotation()` 旋转搜索：找不到图像时原地旋转 90 度扫描围栏四个方向，每个方向触发相机并等待识别结果
+- `mock_vlm.py` Mock VLM 仿真节点：模拟豆包大模型返回预设任务序列，支持 WSL 无摄像头的完整链路测试
+- `seen_image_ids` 去重逻辑：防止同一张任务图像被识别 4 次，已识别过的 image_id 自动跳过
+
+#### Changed
+
+- `_handle_recognize_task_image` 增加旋转重试：每方向等待 10s，4 个方向全部失败才触发 `_retry_perception`
+- `_retry_perception` 改为接收 `phase` 参数，重置旋转计数后回到 SEARCH 状态从头开始
+- `_on_vision_result` 增加 image_id 去重检查 + 低置信度旋转重试（而非直接重试）
+
 ### M2 — 精准到点判定 (2026-05-24)
 
 #### Added
