@@ -30,3 +30,8 @@ Thumbs.db
 # Sensitive - API keys, local configs
 *.local.md
 src/abot_vlm/scripts/API_KEY*.py
+
+# Large model files (keep locally only)
+src/robot_slam/scripts/paraformer-zh/model.pt
+*.pt
+*.pth
