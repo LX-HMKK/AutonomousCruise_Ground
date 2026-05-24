@@ -66,3 +66,69 @@ def get_cell_center_xy(cell_number, field_config):
     x = (col - cols / 2.0) * cell_size + cell_size / 2.0
     y = (rows / 2.0 - row) * cell_size - cell_size / 2.0
     return x, y
+
+
+def _point_in_polygon(px, py, polygon):
+    """射线法判断点是否在多边形内部。polygon 为 [(x,y), ...] 顶点列表。"""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def check_footprint_in_region(robot_x, robot_y, robot_yaw, footprint, cell_number, field_config):
+    """
+    判断机器人 footprint 是否完全进入指定任务点区域。
+
+    Args:
+        robot_x, robot_y: 机器人 base_link 在 map 坐标系下的位置 (m)
+        robot_yaw: 机器人朝向角 (rad)
+        footprint: 机器人 footprint 顶点列表 [[x1,y1], [x2,y2], ...]，相对于 base_link
+        cell_number: 目标任务点网格编号 (1-81)
+        field_config: 场地配置 dict（competition_field.yaml 的内容）
+
+    Returns:
+        (in_region, detail): in_region 为 True 表示完全进入，
+                             detail 包含任务区域中心和超出点信息
+    """
+    import math
+
+    # 获取任务点中心
+    cx, cy = get_cell_center_xy(cell_number, field_config)
+    task_w, task_h = field_config['task_region']['size_m']
+
+    # 任务区域多边形的四个顶点（轴对齐矩形）
+    half_w = task_w / 2.0
+    half_h = task_h / 2.0
+    region_polygon = [
+        (cx - half_w, cy - half_h),
+        (cx + half_w, cy - half_h),
+        (cx + half_w, cy + half_h),
+        (cx - half_w, cy + half_h),
+    ]
+
+    # 将 footprint 顶点从 base_link 坐标系变换到 map 坐标系
+    cos_yaw = math.cos(robot_yaw)
+    sin_yaw = math.sin(robot_yaw)
+    points_outside = []
+
+    for (fx, fy) in footprint:
+        # 旋转 + 平移
+        mx = cos_yaw * fx - sin_yaw * fy + robot_x
+        my = sin_yaw * fx + cos_yaw * fy + robot_y
+        if not _point_in_polygon(mx, my, region_polygon):
+            points_outside.append((mx, my))
+
+    in_region = len(points_outside) == 0
+    detail = {
+        'task_center': (cx, cy),
+        'task_size': (task_w, task_h),
+        'points_outside': points_outside,
+    }
+    return in_region, detail

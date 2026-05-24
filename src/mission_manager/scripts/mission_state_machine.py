@@ -127,11 +127,15 @@ class MissionStateMachine(object):
         self.vision_result = None
         self.vision_result_event = threading.Event()
 
+        # 当前位姿（用于精准到点判定）
+        self.current_pose = None  # (x, y, yaw) in map frame
+
         # 订阅
         rospy.Subscriber('/start', String, self._on_wakeup)
         rospy.Subscriber('/vision_result', String, self._on_vision_result)
         rospy.Subscriber('/move_base/result', String, self._on_nav_result)
         rospy.Subscriber('/safety_status', String, self._on_safety_status)
+        rospy.Subscriber('/abot/pose', PoseStamped, self._on_pose)
 
         rospy.loginfo('[Mission] State machine initialized, sim_mode=%s', sim_mode)
 
@@ -216,6 +220,19 @@ class MissionStateMachine(object):
         # Parse action result status
         self.nav_result = msg
         self.nav_result_event.set()
+
+    def _on_pose(self, msg):
+        """接收机器人当前位姿（/abot/pose topic）。"""
+        import tf.transformations as tft
+        q = msg.pose.orientation
+        _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
+        self.current_pose = (msg.pose.position.x, msg.pose.position.y, yaw)
+
+    def _get_current_pose(self):
+        """返回最新的机器人位姿 (x, y, yaw)，若无数据则返回 (None, None, None)。"""
+        if self.current_pose is not None:
+            return self.current_pose
+        return None, None, None
 
     def _on_safety_status(self, msg):
         """接收安全监控状态。"""
@@ -321,7 +338,6 @@ class MissionStateMachine(object):
             max_retries = self.mission_cfg['timeouts']['navigation_retry_limit']
             if self.navigation_retry_count <= max_retries:
                 rospy.loginfo('[Mission] Nav retry %d/%d', self.navigation_retry_count, max_retries)
-                # Go back to navigate state
                 self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_TASK'))
                 return
             else:
@@ -331,6 +347,33 @@ class MissionStateMachine(object):
 
         self.navigation_retry_count = 0
         self._stop_robot()
+        rospy.sleep(1.0)  # 等待位姿稳定
+
+        # 精准到点判定：检查 footprint 是否完全进入任务点区域
+        rx, ry, ryaw = self._get_current_pose()
+        footprint = [[-0.175, -0.15], [-0.175, 0.15], [0.175, 0.15], [0.175, -0.15]]
+
+        if self.sim_mode and (rx is None):
+            rospy.logwarn('[Mission] Phase %d: No pose available, skipping footprint check', phase)
+        else:
+            from config_loader import check_footprint_in_region
+            in_region, detail = check_footprint_in_region(
+                rx, ry, ryaw, footprint, self.target_cell, self.field_cfg)
+
+            if not in_region:
+                rospy.logwarn('[Mission] Phase %d: Footprint NOT fully inside task region! '
+                              'Outside points: %d, task_center=(%.3f,%.3f), robot=(%.3f,%.3f,%.2f)',
+                              phase, len(detail['points_outside']),
+                              detail['task_center'][0], detail['task_center'][1],
+                              rx, ry, ryaw)
+                # 尝试精细靠拢：发送到任务点中心的微小修正
+                cx, cy = detail['task_center']
+                self._send_nav_goal(cx, cy, 0.0)
+                self.nav_result_event.clear()
+                return  # 再次等待 arrive
+
+            rospy.loginfo('[Mission] Phase %d: Footprint verified inside task region', phase)
+
         self.task_cells_done.append(self.target_cell)
         rospy.loginfo('[Mission] Phase %d: Arrived at task point %d', phase, self.target_cell)
         self.transition(MissionState.task_image_state(phase, 'ANNOUNCE_TASK'))
