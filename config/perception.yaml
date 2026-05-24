@@ -1,0 +1,22 @@
+# config/perception.yaml
+# 任务图像识别模块参数
+
+perception:
+  vlm_model: "doubao-1-5-vision-pro-32k-250115"
+  prompt_template: >
+    你是一个机器人比赛的视觉识别系统。
+    请识别图中围栏上的任务信息图像，
+    输出图像内容和对应的任务点编号（31-33, 40-42, 49-51 之一）。
+    回复格式必须是 JSON：
+    {"target_cell": 数字, "content": "图像内容描述", "confidence": 0到1之间的浮点数}
+    如果无法识别，设置 confidence 为 0。
+
+task_image_mapping:
+  description: "任务图像内容到任务点编号的映射（赛前填充）"
+  mappings: []
+
+camera:
+  capture_width: 640
+  capture_height: 480
+  save_images: true
+  save_path: "logs/"

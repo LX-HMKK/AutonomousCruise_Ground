@@ -1,0 +1,16 @@
+# config/voice_text.yaml
+# 所有播报文本集中配置
+
+voice_text:
+  start: "比赛开始"
+  finish: "比赛结束"
+  wakeup_detected: "唤醒成功，比赛开始"
+  task_image_searching: "正在搜索第 {index} 个任务信息图像"
+  task_image_recognized: "已识别第 {index} 个任务信息，目标任务点为 {target_cell} 号区域"
+  task_image_failed: "第 {index} 个任务信息识别失败，正在重试"
+  navigating_to_task: "正在前往 {target_cell} 号任务点"
+  task_arrived: "已到达 {target_cell} 号任务点"
+  navigating_to_finish: "全部任务完成，正在前往终点"
+  finish_arrived: "已到达终点，比赛结束"
+  abort_timeout: "任务超时，比赛结束"
+  abort_collision: "检测到碰撞风险，比赛终止"
