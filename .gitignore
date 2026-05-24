@@ -35,3 +35,5 @@ src/abot_vlm/scripts/API_KEY*.py
 src/robot_slam/scripts/paraformer-zh/model.pt
 *.pt
 *.pth
+src/robot_slam/scripts/paraformer-zh/
+src/robot_slam/resources/_snowboydetect.so
