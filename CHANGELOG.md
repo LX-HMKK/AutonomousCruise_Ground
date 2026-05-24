@@ -4,11 +4,50 @@
 
 ## [Unreleased]
 
-### Added
+### M2 — 精准到点判定 (2026-05-24)
 
-- 初始化仓库结构与项目文档
-  - `docs/PROJECT_REQUIREMENTS_GROUND_CRUISE.md`：比赛完整需求说明
-  - `README.md`：项目说明与快速开始
-  - `CHANGELOG.md`：版本变更记录
-  - `CLAUDE.md`：Claude Code 协作指引
-  - `docs/assets/`：比赛场地图与机器人参数表
+#### Added
+
+- `check_footprint_in_region()` 精准到点判定函数（射线法判断 footprint 四顶点是否全在任务区域内）
+- `_on_pose` 回调订阅 `/abot/pose` 获取机器人实时位姿
+- `_get_current_pose()` 位姿读取方法
+- 三种运行模式启动脚本：`mapping.sh`（8 节点）、`navigation_test.sh`（10 节点）、`competition.sh`（14 节点）
+- `my_lab` 先验地图（从远端 ABOT 备份拷贝，用于仿真）
+- README.md 重写：实际开发环境、9 个功能包详细职责、构建命令、开发进度
+
+#### Changed
+
+- `_handle_arrive_task` 增加 footprint 区域验证：导航成功后等待位姿稳定 → 检查 footprint → 不通过则发送修正目标
+- CLAUDE.md 补充节点架构文档（三种模式树状图 + 数据流 + 14 个节点清单）
+
+### M1 — 配置系统与状态机骨架 (2026-05-24)
+
+#### Added
+
+- `config/` 6 个 YAML 参数配置文件（competition_field / mission / robot / navigation / perception / voice_text）
+- `src/common/` 公共工具包：`config_loader.py`（配置加载 + 网格坐标转换）、`mission_logger.py`（JSONL 结构化日志）
+- `src/mission_manager/` 任务管理包：`mission_state_machine.py`（438 行完整状态机，6 个正常状态 + 6 个异常状态）、`safety_monitor.py`（激光碰撞检测 + 里程计运动监控 + heartbeat watchdog + 急停）
+- `launch/ground_cruise.launch` 比赛统一启动入口
+- Snowboy 唤醒词模型 `startGame.pmdl`
+- FunASR Paraformer 中文语音识别模型（本地保留，gitignore）
+
+#### Changed
+
+- `abot_vlm/doubao.py` VLM prompt 改为比赛任务图像识别规格（从 ROS param `/perception/prompt_template` 读取）
+- `robot_slam/params/carto/` 导航参数调优适配 3.6m 小场地（xy_goal_tolerance 0.03m, footprint 175×150mm, inflation_radius 0.22m）
+- MissionState 从 Python 3 `Enum` 改为 Python 2 兼容的自定义类
+
+#### Fixed
+
+- `mission_logger.py` 移除 `os.makedirs(exist_ok=True)` Python 3 专有参数
+
+### M0 — 仓库初始化 (2026-05-23)
+
+#### Added
+
+- `docs/PROJECT_REQUIREMENTS_GROUND_CRUISE.md` 比赛完整需求说明（来源：第二十八届中国机器人及人工智能大赛比赛规则）
+- `README.md` 项目说明
+- `CLAUDE.md` Claude Code 协作指引
+- 远端 ABOT 设备 `abot_ws/` 源码同步（17 个功能包，保留 7 个有用包）
+- 比赛场地图与机器人参数表素材
+- `.gitignore` 配置（build/devel/logs/__pycache__/大模型文件/API_KEY）

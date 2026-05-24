@@ -42,6 +42,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   roslaunch mission_manager sim_mission.launch
   ```
 
+## 文档维护规则
+
+- **每次大修改后必须更新 `CHANGELOG.md`**：记录本次变更的 Added / Changed / Fixed / Removed，按 M0~M7 阶段分组
+- **功能包职责变更时更新 `README.md` 和 `CLAUDE.md`**：保持目录结构、功能包说明与代码一致
+- **CHANGELOG 格式**：遵循 Keep a Changelog，按开发里程碑（M0-M7）组织，每个条目标注日期
+
 ## Git 提交规范
 
 严格遵循 **Angular 提交规范**，使用**中文**编写提交信息。
