@@ -1,0 +1,23 @@
+# config/mission.yaml
+# 比赛任务全局参数：超时、重试、语音要求
+
+mission:
+  max_time_s: 180
+  required_task_image_count: 4
+  require_start_voice: true
+  require_finish_voice: true
+  stop_before_voice: true
+  voice_static_hold_s: 0.5
+  localization_required: true
+  retry_on_low_confidence: true
+
+timeouts:
+  no_motion_after_start_s: 20
+  no_state_change_s: 20
+  perception_retry_limit: 3
+  navigation_retry_limit: 2
+  navigation_goal_timeout_s: 60
+
+confidence:
+  min_confidence: 0.6
+  description: "低于此置信度触发重识别或人工介入"
