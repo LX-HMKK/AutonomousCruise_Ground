@@ -39,7 +39,7 @@ echo "[3/6] 启动仿真 (roslaunch 自动启动 roscore)..."
 source /opt/ros/melodic/setup.bash
 source "$WS"/devel/setup.bash
 roslaunch mission_manager sim_full_mission.launch > "$LOG" 2>&1 &
-sleep 20  # 10 个节点启动需要时间
+sleep 10  # 等待节点就绪
 
 echo ""
 echo "  === 运行中节点 ==="
@@ -50,10 +50,10 @@ NODE_COUNT=$(rosnode list 2>&1 | wc -l)
 echo "  节点数: $NODE_COUNT"
 
 # 5. 设置初始位姿 + 触发唤醒
-echo "[4/6] 设置初始位姿 (x=1.0, y=1.0)..."
+echo "[4/6] 设置初始位姿 (x=0.0, y=0.0)..."
 # 单行格式，避免多行 heredoc 卡住
-rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped '{header: {frame_id: map}, pose: {pose: {position: {x: 1.0, y: 1.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}' 2>&1
-sleep 5
+rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped '{header: {frame_id: map}, pose: {pose: {position: {x: 0.0, y: 0.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}' 2>&1
+sleep 2
 
 echo "  触发唤醒..."
 rostopic pub -1 /start std_msgs/String "data: 'sim_wakeup'" 2>&1
@@ -86,7 +86,7 @@ echo "完整任务日志:"
 grep -i "->\|Navigating\|Arrived\|Recogni\|Phase\|cell\|TTS\|DONE\|ABORT\|ERROR\|vision_result\|speak" "$LOG" 2>/dev/null
 echo ""
 echo "错误检查:"
-grep -i "error\|fatal\|ABORT\|Traceback" "$LOG" 2>/dev/null | head -10 || echo "  (无错误)"
+grep -iE "ABORT|Traceback|FATAL|CRASH|Unhandled|except" "$LOG" 2>/dev/null | grep -v "Unable to communicate" | head -10 || echo "  (无严重错误)"
 echo ""
 echo "完整日志: $LOG"
 echo "========================================"

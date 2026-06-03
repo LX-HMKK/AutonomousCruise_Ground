@@ -35,8 +35,8 @@ class SafetyMonitor(object):
         self.last_motion_time = time.time()
         self.last_odom = None
         self.motion_started = False
+        self.mission_started = False  # 首次心跳后为 True
         self.estop_active = False
-        self.init_time = time.time()
 
         # 订阅
         rospy.Subscriber('/scan_filtered', LaserScan, self._on_scan)
@@ -74,7 +74,15 @@ class SafetyMonitor(object):
         dy = msg.pose.pose.position.y - self.last_odom.pose.pose.position.y
         dist = (dx * dx + dy * dy) ** 0.5
 
-        if dist > 0.01:  # 移动超过 1cm 则认为在运动
+        # 检测角运动（旋转搜索时线性位移为 0，但 yaw 在变化）
+        import tf.transformations as tft
+        q_old = self.last_odom.pose.pose.orientation
+        q_new = msg.pose.pose.orientation
+        _, _, yaw_old = tft.euler_from_quaternion([q_old.x, q_old.y, q_old.z, q_old.w])
+        _, _, yaw_new = tft.euler_from_quaternion([q_new.x, q_new.y, q_new.z, q_new.w])
+        yaw_diff = abs(yaw_new - yaw_old)
+
+        if dist > 0.01 or yaw_diff > 0.05:  # 平移 >1cm 或旋转 >0.05rad
             self.last_motion_time = time.time()
             if not self.motion_started:
                 self.motion_started = True
@@ -83,7 +91,11 @@ class SafetyMonitor(object):
         self.last_odom = msg
 
     def _on_heartbeat(self, msg):
-        """任务状态机心跳回调。"""
+        """任务状态机心跳回调。首次心跳标记任务开始。"""
+        if not self.mission_started:
+            self.mission_started = True
+            self.init_time = time.time()
+            self.logger.log_system('mission_started', 'first heartbeat received')
         self.last_heartbeat_time = time.time()
 
     def _on_estop(self, msg):
@@ -103,8 +115,8 @@ class SafetyMonitor(object):
         """检查超时条件（在主循环中调用）。"""
         now = time.time()
 
-        # 检查启动后是否长时间未运动
-        if not self.motion_started:
+        # 任务开始后是否长时间未运动
+        if self.mission_started and not self.motion_started:
             if now - self.init_time > self.no_motion_timeout_s:
                 rospy.logerr('[Safety] No motion after start (%.1fs > %.1fs)!',
                              now - self.init_time, self.no_motion_timeout_s)

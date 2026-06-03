@@ -278,10 +278,13 @@ class MissionStateMachine(object):
         """接收安全监控状态。"""
         if msg.data.startswith('ESTOP'):
             rospy.logerr('[Mission] Safety ESTOP received: %s', msg.data)
-            if 'collision' in msg.data.lower():
+            data_lower = msg.data.lower()
+            if 'collision' in data_lower:
                 self.transition(MissionState.ABORT_COLLISION_RISK)
-            elif 'manual' in msg.data.lower():
+            elif 'manual' in data_lower:
                 self.transition(MissionState.MANUAL_STOP_REQUESTED)
+            else:
+                self.transition(MissionState.ABORT_TIMEOUT)
 
     # ========== Phase Handlers ==========
 
@@ -334,7 +337,7 @@ class MissionStateMachine(object):
         self._stop_robot()
         rospy.sleep(0.5)
 
-        # 旋转 90 度 (约 2 秒，角速度 0.78 rad/s)
+        # 旋转 90 度 (角速度 0.78 rad/s，仿真下缩短)
         twist = Twist()
         twist.angular.z = 0.78
 
@@ -345,7 +348,8 @@ class MissionStateMachine(object):
         self.vision_result_event.clear()
 
         # 发布旋转指令
-        end_time = rospy.Time.now() + rospy.Duration(2.0)
+        rot_dur = 1.5 if self.sim_mode else 2.0
+        end_time = rospy.Time.now() + rospy.Duration(rot_dur)
         while rospy.Time.now() < end_time and not rospy.is_shutdown():
             self.cmd_vel_pub.publish(twist)
             rospy.sleep(0.1)
@@ -581,8 +585,9 @@ class MissionStateMachine(object):
         except Exception as e:
             rospy.logerr('[Mission] TTS publish failed: %s', str(e))
         rospy.loginfo('[Mission] TTS: %s', text)
-        # 等待播报完成（估计时间，实际应监听 feedback）
-        rospy.sleep(2.0)
+        # 等待播报完成（仿真下缩短）
+        sleep_s = 1.0 if self.sim_mode else 2.0
+        rospy.sleep(sleep_s)
 
     def _stop_robot(self):
         """确保机器人完全停止。"""
