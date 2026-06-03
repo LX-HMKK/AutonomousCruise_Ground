@@ -48,15 +48,11 @@
 │   ├── perception.yaml                  # VLM prompt 模板、相机设置
 │   └── voice_text.yaml                  # 播报文本模板（12 条）
 ├── src/                                 # ROS 功能包
-│   ├── mission_manager/                 # 【新建】任务状态机 + 安全监控（今年核心）
-│   ├── common/                          # 【新建】配置加载、日志、网格坐标转换
+│   ├── mission_manager/                 # 【核心】任务状态机 + 安全监控 + 仿真 mock
+│   ├── common/                          # 配置加载、日志、网格坐标转换
 │   ├── robot_slam/                      # 导航定位/建图/ASR/唤醒词（核心复用）
 │   ├── abot_base/                       # ABOT 底盘驱动/IMU/URDF 模型/激光滤波
-│   ├── abot_vlm/                        # 豆包大模型视觉识别（任务图像）
-│   ├── user_demo/                       # 旧版状态机（C++，2025 射击赛，仅参考）
-│   ├── abot_find/                       # find_object_2d 特征点检测（SURF）
-│   ├── hector_slam/                     # Hector SLAM（无里程计建图，备选）
-│   └── imu_filter/                      # IMU 姿态滤波（Madgwick/Mahony）
+│   └── abot_vlm/                        # 豆包大模型视觉识别（任务图像）
 ├── launch/
 │   └── ground_cruise.launch             # 比赛统一启动入口
 ├── scripts/                             # 远端 ABOT 启动脚本（参考）
@@ -71,10 +67,11 @@
 
 | 文件 | 职责 |
 |---|---|
-| `scripts/mission_state_machine.py` | 完整状态机：IDLE → WAIT_FOR_WAKEUP → START_ANNOUNCE → SEARCH/RECOGNIZE/NAVIGATE/ARRIVE/ANNOUNCE × 4 → NAVIGATE_TO_FINISH → FINISH_ANNOUNCE → DONE。6 个异常状态。旋转搜索（4方向×90°扫描围栏）、footprint 区域判定、图像去重、感知重试。by move_base actionlib 导航，订阅 `/vision_result` 识别，发布 `/voiceWords` 播报。 |
-| `scripts/mock_vlm.py` | Mock VLM 仿真节点：监控 `im_flag` 参数上升沿，按预设序列发布 JSON 识别结果到 `/vision_result`，支持 WSL 无摄像头测试。 |
-| `scripts/safety_monitor.py` | 安全监控：激光碰撞检测 + 里程计运动监控 + heartbeat watchdog + 急停。 |
-| `scripts/safety_monitor.py` | 安全监控节点：激光雷达碰撞检测（< 0.10m 急停）、里程计运动监控、heartbeat watchdog（5s 超时）、急停发布 `/safety_status`。 |
+| `scripts/mission_state_machine.py` | 完整状态机：IDLE → WAIT_FOR_WAKEUP → START_ANNOUNCE → SEARCH/RECOGNIZE/NAVIGATE/ARRIVE/ANNOUNCE × 4 → NAVIGATE_TO_FINISH → FINISH_ANNOUNCE → DONE。6 个异常状态。旋转搜索、footprint 判定、图像去重、感知重试。TTS 播报等待 `/tts_done` 回调。 |
+| `scripts/safety_monitor.py` | 安全监控：激光碰撞检测（<0.10m 急停）、里程计运动监控、heartbeat watchdog（5s 超时） |
+| `scripts/mock_vlm.py` | Mock VLM 仿真：按预设序列发布 `/vision_result`，支持 WSL 无摄像头测试 |
+| `scripts/mock_tts.py` | Mock TTS 仿真：订阅 `/voiceWords`，按字数估算时长后发布 `/tts_done`（M4 新增） |
+| `scripts/sim_robot.py` | 仿真机器人：发布 odom + scan + TF，订阅 cmd_vel 模拟运动 |
 
 #### common（新建，Python）
 公共工具包，提供配置加载、日志、坐标变换。
@@ -108,15 +105,6 @@ ABOT 机器人底层硬件驱动，**不改动**。
 
 #### abot_vlm（复用，Python）
 大模型视觉识别，订阅 `/usb_cam/image_raw`，触发后拍照发送豆包 Vision Pro API (`doubao-1-5-vision-pro-32k-250115`)，发布 JSON 识别结果到 `/vision_result`。Prompt 已改为比赛任务图像识别规格。
-
-#### 其他包
-
-| 包 | 职责 | 状态 |
-|---|---|---|
-| `user_demo` | 2025 射击赛 C++ 状态机（硬编码路径点 + AR 标签射击），今年废弃 | 仅参考 |
-| `abot_find` | find_object_2d，SURF 特征点物体检测（Qt GUI），可用于备选识别方案 | 可选 |
-| `hector_slam` | Hector SLAM，不依赖里程计的激光 SLAM | 备选建图 |
-| `imu_filter` | Madgwick/Mahony 姿态滤波器 | IMU 后处理 |
 
 ## 构建与运行
 
