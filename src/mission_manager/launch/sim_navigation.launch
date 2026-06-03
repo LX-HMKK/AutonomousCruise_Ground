@@ -10,10 +10,11 @@
   <param name="robot_description" textfile="$(find abot_model)/urdf/abot_model.urdf"/>
   <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"/>
 
-  <!-- 3. 仿真机器人（odom + scan + TF） -->
+  <!-- 3. 仿真机器人（odom + scan + TF）起点设为比赛起点 cell 1 = (-1.6, 1.6) -->
   <node pkg="mission_manager" type="sim_robot.py" name="sim_robot" output="screen">
-    <param name="init_x" value="0.0"/>
-    <param name="init_y" value="0.0"/>
+    <param name="init_x" value="-1.6"/>
+    <param name="init_y" value="1.6"/>
+    <param name="init_yaw" value="0.0"/>
   </node>
 
   <!-- 4. move_base 导航栈 -->

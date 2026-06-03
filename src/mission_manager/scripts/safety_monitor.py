@@ -113,6 +113,8 @@ class SafetyMonitor(object):
 
     def check_timeouts(self):
         """检查超时条件（在主循环中调用）。"""
+        if self.estop_active:
+            return  # 已急停，不再重复检查
         now = time.time()
 
         # 任务开始后是否长时间未运动

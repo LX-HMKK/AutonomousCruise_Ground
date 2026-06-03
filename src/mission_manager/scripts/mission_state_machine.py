@@ -110,6 +110,7 @@ class MissionStateMachine(object):
         self.mission_start_time = time.time()
         self.perception_retry_count = 0
         self.navigation_retry_count = 0
+        self.footprint_retry_count = 0  # 防止 footprint 检查死循环
         self.finish_nav_retry_count = 0
         self.recognition_in_progress = False
         self.rotation_attempt = 0
@@ -134,6 +135,7 @@ class MissionStateMachine(object):
 
         # 当前位姿（用于精准到点判定）
         self.current_pose = None  # (x, y, yaw) in map frame
+        self._has_abot_pose = False  # 区分 /abot/pose 与 /odom 来源
 
         # 订阅
         rospy.Subscriber('/start', String, self._on_wakeup)
@@ -256,14 +258,15 @@ class MissionStateMachine(object):
 
     def _on_pose(self, msg):
         """接收机器人当前位姿（/abot/pose topic）。"""
+        self._has_abot_pose = True
         q = msg.pose.orientation
         _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
         self.current_pose = (msg.pose.position.x, msg.pose.position.y, yaw)
 
     def _on_odom(self, msg):
         """接收里程计数据，作为备选位姿来源（仿真用）。"""
-        if self.current_pose is not None:
-            return  # /abot/pose 优先级更高
+        if self._has_abot_pose:
+            return  # /abot/pose 优先级更高，忽略 /odom
         q = msg.pose.pose.orientation
         _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
         self.current_pose = (msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
@@ -409,6 +412,7 @@ class MissionStateMachine(object):
         self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_TASK'))
 
     def _handle_navigate_to_task(self, phase):
+        self.footprint_retry_count = 0  # 新任务，重置 footprint 重试计数
         if self.target_cell is None:
             rospy.logerr('[Mission] Phase %d: No target cell set!', phase)
             self.transition(MissionState.ABORT_PERCEPTION_FAILED)
@@ -478,10 +482,27 @@ class MissionStateMachine(object):
                               phase, len(detail['points_outside']),
                               detail['task_center'][0], detail['task_center'][1],
                               rx, ry, ryaw)
-                # 尝试精细靠拢：发送到任务点中心的微小修正
+                self.footprint_retry_count += 1
                 cx, cy = detail['task_center']
-                self._send_nav_goal(cx, cy, 0.0)
-                return  # 再次等待 arrive
+                import math
+                dist_to_target = math.sqrt((rx - cx)**2 + (ry - cy)**2)
+                if self.footprint_retry_count <= 2:
+                    # 前两次：重发完整导航目标修正位置
+                    self._send_nav_goal(cx, cy, 0.0)
+                    return
+                elif dist_to_target < 0.08 and abs(ryaw) > 0.05:
+                    # 位置已很接近但朝向不对：原地旋转对齐 yaw=0
+                    rospy.loginfo('[Mission] Phase %d: Position close, aligning yaw (%.2f rad -> 0)', phase, ryaw)
+                    self._send_nav_goal(rx, ry, 0.0)
+                    return
+                elif self.footprint_retry_count <= 5:
+                    # 位置偏差较大：回退一小段后重新靠拢
+                    rospy.loginfo('[Mission] Phase %d: Backing off and re-approaching', phase)
+                    self._send_nav_goal(cx, cy, 0.0)
+                    return
+                else:
+                    # 多次重试仍失败，不再死循环，接受当前位置
+                    rospy.logwarn('[Mission] Phase %d: Footprint retry limit reached, accepting position', phase)
 
             rospy.loginfo('[Mission] Phase %d: Footprint verified inside task region', phase)
 
