@@ -22,7 +22,7 @@ mkdir -p "$WS"/src/mission_manager/launch "$WS"/config
 cp "$SRC"/src/mission_manager/scripts/*.py "$WS"/src/mission_manager/scripts/
 cp "$SRC"/src/mission_manager/launch/*.launch "$WS"/src/mission_manager/launch/
 cp "$SRC"/config/*.yaml "$WS"/config/ 2>/dev/null || true
-cp "$SRC"/src/robot_slam/maps/competition_field.* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
+cp "$SRC"/src/robot_slam/maps/game.* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
 T1=$(date +%s); echo "  sync: $((T1-T0))s"
 
 # 3. 启动仿真 (roslaunch 自动管理 roscore，用 rostopic 检查比 rosnode list 更快)

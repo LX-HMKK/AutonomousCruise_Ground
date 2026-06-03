@@ -1,6 +1,6 @@
 <launch>
   <!-- 完整比赛仿真：导航 + VLM + 状态机 + 安全监控 -->
-  <arg name="map_name" default="competition_field"/>
+  <arg name="map_name" default="game"/>
   <arg name="task_sequence" default="[41, 33, 50, 31]"/>
 
   <!-- 1. 仿真环境 (map + robot + AMCL + move_base) -->

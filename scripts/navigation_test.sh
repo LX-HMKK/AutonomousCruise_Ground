@@ -10,7 +10,7 @@
 # ============================================
 
 WS_PATH="${HOME}/abot_ws"
-MAP_NAME="${1:-my_lab}"
+MAP_NAME="${1:-game}"
 GOALS_SCRIPT="${2:-navigation_multi_goals.py}"
 
 echo "=== ABOT 预设路径导航测试 ==="

@@ -10,7 +10,7 @@
 # ============================================
 
 WS_PATH="${HOME}/abot_ws"
-MAP_NAME="${1:-my_lab}"
+MAP_NAME="${1:-game}"
 
 echo "=== ABOT 键盘控制建图 ==="
 echo "地图: ${WS_PATH}/src/robot_slam/maps/${MAP_NAME}"

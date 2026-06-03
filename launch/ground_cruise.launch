@@ -1,7 +1,7 @@
 <launch>
   <!-- 地面巡航比赛完整启动入口 -->
   <arg name="sim_mode" default="true"/>
-  <arg name="map_name" default="competition_field"/>
+  <arg name="map_name" default="game"/>
 
   <!-- 1. 唤醒词检测 (Snowboy hotword) -->
   <include file="$(find robot_slam)/launch/GameStart.launch"/>

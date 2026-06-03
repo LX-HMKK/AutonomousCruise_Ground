@@ -13,6 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 本机开发（主要）
 
 - **环境**：Windows WSL Ubuntu 18.04，ROS Melodic，catkin 工作空间
+- **WSL 用户**：`lx_hm`，sudo 密码：`123456`
 - **仿真方式**：先验地图模拟导航，mock 数据模拟图像/语音
 - 所有修改优先在本机 `abot_ws/` 完成并验证
 - **代码源路径**：仓库位于 Windows 文件系统 (`D:\StudyWorks\...`)，运行时需同步到 WSL 的 `~/abot_ws/src/`（Python 脚本可直接 cp，C++ 需 `catkin_make`）
@@ -43,7 +44,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   ```
 - 仅启动导航仿真测试（4 个节点，无 VLM/状态机）：
   ```bash
-  roslaunch mission_manager sim_navigation.launch map_name:=competition_field
+  roslaunch mission_manager sim_navigation.launch map_name:=game
   ```
 
 ## 文档维护规则
@@ -241,7 +242,7 @@ safety_monitor ──/safety_status──→ mission_state_machine
 | ROS 端口冲突 | 11311 端口 TIME_WAIT 60s | 启动前 `export ROS_MASTER_URI=http://localhost:0` 使用随机端口 |
 | map→odom TF 缺失 | 导航栈无路径规划 | `sim_robot.py` 必须发布 `map→odom` identity transform |
 | 仿真唤醒 | 状态机等待 /start 不启动 | `sim_mode=true` 下状态机 5s 后自动唤醒，无需手动发 `/start` |
-| 起点在地图外 | AMCL 粒子群发散 | `competition_field` 地图尺寸 3.6m，起点应设在 (0, 0) 附近 |
+| 起点在地图外 | AMCL 粒子群发散 | `game` 实赛地图，检查 init_x/init_y 是否在 map 范围内 |
 | 安全监控不检测角运动 | 机器人原地旋转不触发监控 | `_on_odom` 回调中增加 yaw 变化判断 |
 | heartbeat 时机 | rospy.spin 阻塞不执行心跳 | 用 `rospy.Timer(2s)` 独立线程发送 heartbeat |
 
