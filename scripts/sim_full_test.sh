@@ -41,14 +41,13 @@ echo "  === 节点进程 ==="
 grep "process\[" "$LOG" 2>/dev/null | grep "started with pid" | sed "s/.*process\[//;s/\].*//" || echo "(读取中...)"
 echo ""
 
-# 4. 初始位姿 + 唤醒
-echo "[4/5] 设置初始位姿..."
+# 4. 初始位姿 (唤醒由 launch 文件自动触发)
+echo "[4/5] 设置初始位姿 (x=0.0, y=0.0)..."
+source /opt/ros/melodic/setup.bash
+source "$WS"/devel/setup.bash
 rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped '{header: {frame_id: map}, pose: {pose: {position: {x: 0.0, y: 0.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}' 2>&1
 sleep 2
-
-echo "  触发唤醒..."
-rostopic pub -1 /start std_msgs/String "data: 'sim_wakeup'" 2>&1
-echo "  唤醒已发送"
+echo "  等待自动唤醒 (launch 文件延迟 8s 发送)..."
 
 # 5. 监控
 echo "[5/5] 监控任务进展 (60s)..."
