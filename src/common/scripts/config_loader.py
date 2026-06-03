@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """配置加载工具：从 config/ YAML 文件加载比赛参数。"""
 import os
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
 import yaml
 import rospy
 

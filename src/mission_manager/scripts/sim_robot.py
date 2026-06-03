@@ -8,7 +8,7 @@
 发布的 Topic:
   /odom            (nav_msgs/Odometry) - 里程计
   /scan_filtered   (sensor_msgs/LaserScan) - 模拟空场地激光数据
-  TF: odom -> base_footprint -> base_link
+  TF: odom -> base_footprint
 """
 import rospy
 import math
@@ -111,17 +111,6 @@ class SimRobot(object):
         t.transform.translation.z = 0.0
         t.transform.rotation = Quaternion(*q)
         self.tf_br.sendTransformMessage(t)
-
-        # base_footprint -> base_link (identity)
-        t2 = TransformStamped()
-        t2.header.stamp = now
-        t2.header.frame_id = 'base_footprint'
-        t2.child_frame_id = 'base_link'
-        t2.transform.translation.x = 0.0
-        t2.transform.translation.y = 0.0
-        t2.transform.translation.z = 0.0
-        t2.transform.rotation = Quaternion(0, 0, 0, 1)
-        self.tf_br.sendTransformMessage(t2)
 
     def run(self):
         """主循环：20 Hz。"""

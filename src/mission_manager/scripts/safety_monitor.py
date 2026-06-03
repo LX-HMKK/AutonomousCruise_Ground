@@ -36,6 +36,7 @@ class SafetyMonitor(object):
         self.last_odom = None
         self.motion_started = False
         self.estop_active = False
+        self.init_time = time.time()
 
         # 订阅
         rospy.Subscriber('/scan_filtered', LaserScan, self._on_scan)
@@ -104,9 +105,9 @@ class SafetyMonitor(object):
 
         # 检查启动后是否长时间未运动
         if not self.motion_started:
-            if now - self.last_heartbeat_time > self.no_motion_timeout_s:
+            if now - self.init_time > self.no_motion_timeout_s:
                 rospy.logerr('[Safety] No motion after start (%.1fs > %.1fs)!',
-                             now - self.last_heartbeat_time, self.no_motion_timeout_s)
+                             now - self.init_time, self.no_motion_timeout_s)
                 self._emergency_stop('no_motion_after_start')
                 return
 
@@ -122,6 +123,8 @@ class SafetyMonitor(object):
         """主循环：10 Hz 运行，持续检查超时。"""
         rate = rospy.Rate(10)
         while not rospy.is_shutdown():
+            if self.estop_active:
+                self.cmd_vel_pub.publish(Twist())
             self.check_timeouts()
             if not self.estop_active:
                 self.status_pub.publish(String(data='OK'))

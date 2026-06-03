@@ -3,6 +3,9 @@
 """地面巡航比赛任务状态机。统一管理比赛流程。"""
 import os
 import sys
+# Python 2 中文兼容：设置默认编码为 UTF-8
+reload(sys)
+sys.setdefaultencoding('utf-8')
 import rospy
 import time
 import json
@@ -111,19 +114,17 @@ class MissionStateMachine(object):
         self.seen_image_ids = []  # 已识别的图像 ID，防止重复
 
         # ROS 接口
+        # 先创建 heartbeat publisher 并立刻发布，防止 safety 误判超时
+        self.heartbeat_pub = rospy.Publisher('/mission_heartbeat', String, queue_size=1)
+        self.heartbeat_pub.publish(String(data='init'))
+        self.voice_pub = rospy.Publisher('/voiceWords', String, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+
         self.move_base_client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
         rospy.loginfo('[Mission] Waiting for move_base action server...')
         connected = self.move_base_client.wait_for_server(rospy.Duration(10.0))
         if not connected:
             rospy.logwarn('[Mission] move_base not available, navigation disabled')
-
-        self.voice_pub = rospy.Publisher('/voiceWords', String, queue_size=10)
-        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-        self.heartbeat_pub = rospy.Publisher('/mission_heartbeat', String, queue_size=1)
-
-        # 导航结果跟踪
-        self.nav_result = None
-        self.nav_result_event = threading.Event()
 
         # 识别结果跟踪
         self.vision_result = None
@@ -135,11 +136,17 @@ class MissionStateMachine(object):
         # 订阅
         rospy.Subscriber('/start', String, self._on_wakeup)
         rospy.Subscriber('/vision_result', String, self._on_vision_result)
-        rospy.Subscriber('/move_base/result', String, self._on_nav_result)
         rospy.Subscriber('/safety_status', String, self._on_safety_status)
         rospy.Subscriber('/abot/pose', PoseStamped, self._on_pose)
 
+        # 心跳定时器 (2s 间隔，独立于主循环，防止安全监控误判超时)
+        self.heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._publish_heartbeat)
+
         rospy.loginfo('[Mission] State machine initialized, sim_mode=%s', sim_mode)
+
+    def _publish_heartbeat(self, event):
+        """心跳定时器回调。"""
+        self.heartbeat_pub.publish(String(data='alive'))
 
     def transition(self, new_state):
         """状态跳转，记录日志。"""
@@ -157,29 +164,36 @@ class MissionStateMachine(object):
         self.transition(MissionState.WAIT_FOR_WAKEUP)
 
         while not rospy.is_shutdown():
-            self.heartbeat_pub.publish(String(data='alive'))
-            self._check_global_timeouts()
+            try:
+                # heartbeat 由 rospy.Timer 独立发布
+                self._check_global_timeouts()
 
-            if self.state == MissionState.WAIT_FOR_WAKEUP:
-                self._handle_wait_for_wakeup()
-            elif self.state == MissionState.START_ANNOUNCE:
-                self._handle_start_announce()
-            elif self.state == MissionState.NAVIGATE_TO_FINISH:
-                self._handle_navigate_to_finish()
-            elif self.state == MissionState.ARRIVE_FINISH:
-                self._handle_arrive_finish()
-            elif self.state == MissionState.FINISH_ANNOUNCE:
-                self._handle_finish_announce()
-            elif self.state == MissionState.DONE:
-                rospy.loginfo('[Mission] All tasks completed successfully!')
-                break
-            elif self.state in self.ABORT_STATES:
-                self._handle_abort()
-                break
-            else:
-                self._handle_task_phase()
+                if self.state == MissionState.WAIT_FOR_WAKEUP:
+                    self._handle_wait_for_wakeup()
+                elif self.state == MissionState.START_ANNOUNCE:
+                    self._handle_start_announce()
+                elif self.state == MissionState.NAVIGATE_TO_FINISH:
+                    self._handle_navigate_to_finish()
+                elif self.state == MissionState.ARRIVE_FINISH:
+                    self._handle_arrive_finish()
+                elif self.state == MissionState.FINISH_ANNOUNCE:
+                    self._handle_finish_announce()
+                elif self.state == MissionState.DONE:
+                    rospy.loginfo('[Mission] All tasks completed successfully!')
+                    break
+                elif self.state in self.ABORT_STATES:
+                    self._handle_abort()
+                    break
+                else:
+                    self._handle_task_phase()
 
-            rate.sleep()
+                rate.sleep()
+            except Exception as e:
+                import traceback
+                rospy.logerr('[Mission] Unhandled exception: %s', str(e))
+                rospy.logerr('[Mission] Traceback:\n%s', traceback.format_exc())
+                rospy.sleep(1.0)
+                raise
 
     # ========== Callbacks ==========
 
@@ -237,15 +251,8 @@ class MissionStateMachine(object):
         except (ValueError, KeyError, TypeError) as e:
             rospy.logerr('[Mission] Invalid vision result: %s', str(e))
 
-    def _on_nav_result(self, msg):
-        """接收 move_base 导航结果。"""
-        # Parse action result status
-        self.nav_result = msg
-        self.nav_result_event.set()
-
     def _on_pose(self, msg):
         """接收机器人当前位姿（/abot/pose topic）。"""
-        import tf.transformations as tft
         q = msg.pose.orientation
         _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
         self.current_pose = (msg.pose.position.x, msg.pose.position.y, yaw)
@@ -277,6 +284,7 @@ class MissionStateMachine(object):
         self._speak(text)
         self.logger.log_voice(text, 'start')
         self.task_index = 0
+        self.perception_retry_count = 0
         phase = self.task_index + 1
         self.transition(MissionState.task_image_state(phase, 'SEARCH_TASK_IMAGE'))
 
@@ -318,10 +326,12 @@ class MissionStateMachine(object):
         # 旋转 90 度 (约 2 秒，角速度 0.78 rad/s)
         twist = Twist()
         twist.angular.z = 0.78
-        start_yaw = self._get_current_pose()[2] if self._get_current_pose()[2] is not None else 0.0
 
         rospy.loginfo('[Mission] Phase %d: Rotating to scan fence (attempt %d/4)...',
                       phase, self.rotation_attempt + 1)
+
+        # 清除之前的识别结果，防止中断旋转循环
+        self.vision_result_event.clear()
 
         # 发布旋转指令
         end_time = rospy.Time.now() + rospy.Duration(2.0)
@@ -342,7 +352,6 @@ class MissionStateMachine(object):
                       phase, self.rotation_attempt + 1)
 
         self.recognition_in_progress = True
-        self.vision_result_event.clear()
 
         # 等待识别结果（在 _handle_recognize_task_image 中处理超时）
         self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
@@ -352,7 +361,6 @@ class MissionStateMachine(object):
         self._speak(text)
         rospy.loginfo('[Mission] Phase %d: Searching for task image...', phase)
 
-        self.perception_retry_count = 0
         self.rotation_attempt = 0
         self._search_rotation(phase)
 
@@ -396,15 +404,29 @@ class MissionStateMachine(object):
         self.logger.log_navigation(
             {'cell': self.target_cell, 'x': x, 'y': y}, None, True)
 
-        self.nav_result_event.clear()
         self.transition(MissionState.task_image_state(phase, 'ARRIVE_TASK'))
 
     def _handle_arrive_task(self, phase):
         timeout = rospy.Duration(self.mission_cfg['timeouts'].get('navigation_goal_timeout_s', 60))
-        arrived = self.nav_result_event.wait(timeout=timeout.to_sec())
+        arrived = self.move_base_client.wait_for_result(timeout)
 
         if not arrived:
             rospy.logwarn('[Mission] Phase %d: Navigation timeout', phase)
+            self.navigation_retry_count += 1
+            max_retries = self.mission_cfg['timeouts']['navigation_retry_limit']
+            if self.navigation_retry_count <= max_retries:
+                rospy.loginfo('[Mission] Nav retry %d/%d', self.navigation_retry_count, max_retries)
+                self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_TASK'))
+                return
+            else:
+                rospy.logerr('[Mission] Max nav retries exceeded')
+                self.transition(MissionState.ABORT_NAVIGATION_FAILED)
+                return
+
+        # Check if navigation succeeded
+        if self.move_base_client.get_state() != GoalStatus.SUCCEEDED:
+            rospy.logwarn('[Mission] Phase %d: Navigation did not succeed (state=%d)',
+                          phase, self.move_base_client.get_state())
             self.navigation_retry_count += 1
             max_retries = self.mission_cfg['timeouts']['navigation_retry_limit']
             if self.navigation_retry_count <= max_retries:
@@ -424,7 +446,7 @@ class MissionStateMachine(object):
         rx, ry, ryaw = self._get_current_pose()
         footprint = [[-0.175, -0.15], [-0.175, 0.15], [0.175, 0.15], [0.175, -0.15]]
 
-        if self.sim_mode and (rx is None):
+        if rx is None:
             rospy.logwarn('[Mission] Phase %d: No pose available, skipping footprint check', phase)
         else:
             from config_loader import check_footprint_in_region
@@ -440,7 +462,6 @@ class MissionStateMachine(object):
                 # 尝试精细靠拢：发送到任务点中心的微小修正
                 cx, cy = detail['task_center']
                 self._send_nav_goal(cx, cy, 0.0)
-                self.nav_result_event.clear()
                 return  # 再次等待 arrive
 
             rospy.loginfo('[Mission] Phase %d: Footprint verified inside task region', phase)
@@ -459,6 +480,7 @@ class MissionStateMachine(object):
             self.transition(MissionState.NAVIGATE_TO_FINISH)
         else:
             self.task_index += 1
+            self.perception_retry_count = 0
             next_phase = self.task_index + 1
             self.target_cell = None
             self.transition(MissionState.task_image_state(next_phase, 'SEARCH_TASK_IMAGE'))
@@ -475,14 +497,17 @@ class MissionStateMachine(object):
 
         self._stop_robot()
         self._send_nav_goal(x, y)
-        self.nav_result_event.clear()
         self.transition(MissionState.ARRIVE_FINISH)
 
     def _handle_arrive_finish(self):
-        timeout = rospy.Duration(60)
-        arrived = self.nav_result_event.wait(timeout=timeout.to_sec())
+        timeout = rospy.Duration(self.mission_cfg['timeouts'].get('navigation_goal_timeout_s', 60))
+        arrived = self.move_base_client.wait_for_result(timeout)
         if not arrived:
-            rospy.logwarn('[Mission] Finish navigation timeout')
+            rospy.logwarn('[Mission] Finish navigation timeout or did not succeed')
+        else:
+            if self.move_base_client.get_state() != GoalStatus.SUCCEEDED:
+                rospy.logwarn('[Mission] Finish navigation did not succeed (state=%d)',
+                              self.move_base_client.get_state())
         self._stop_robot()
         self.transition(MissionState.FINISH_ANNOUNCE)
 
@@ -497,6 +522,7 @@ class MissionStateMachine(object):
     def _handle_abort(self):
         rospy.logerr('[Mission] ABORT: %s', self.state.value)
         self.logger.log_system('abort', self.state.value)
+        self.move_base_client.cancel_all_goals()
         self._stop_robot()
 
         # Speak appropriate abort message
@@ -514,7 +540,12 @@ class MissionStateMachine(object):
         self._stop_robot()
         hold_s = self.mission_cfg['mission'].get('voice_static_hold_s', 0.5)
         rospy.sleep(hold_s)
-        self.voice_pub.publish(String(data=text))
+        try:
+            msg = String()
+            msg.data = text
+            self.voice_pub.publish(msg)
+        except Exception as e:
+            rospy.logerr('[Mission] TTS publish failed: %s', str(e))
         rospy.loginfo('[Mission] TTS: %s', text)
         # 等待播报完成（估计时间，实际应监听 feedback）
         rospy.sleep(2.0)
@@ -550,6 +581,7 @@ class MissionStateMachine(object):
         if state_elapsed > max_state_time:
             rospy.logwarn('[Mission] State timeout in %s: %.1fs > %ds',
                           self.state.value, state_elapsed, max_state_time)
+            self.transition(MissionState.ABORT_TIMEOUT)
 
     def _retry_perception(self, phase):
         """处理识别重试：重置旋转计数器，从头开始搜索。"""

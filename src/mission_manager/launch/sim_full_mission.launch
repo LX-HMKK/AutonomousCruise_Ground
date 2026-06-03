@@ -8,26 +8,22 @@
     <arg name="map_name" value="$(arg map_name)"/>
   </include>
 
-  <!-- 2. 配置文件加载 -->
-  <rosparam command="load" file="$(find mission_manager)/../../config/competition_field.yaml" ns="competition_field"/>
-  <rosparam command="load" file="$(find mission_manager)/../../config/mission.yaml" ns="mission"/>
-  <rosparam command="load" file="$(find mission_manager)/../../config/robot.yaml" ns="robot"/>
-  <rosparam command="load" file="$(find mission_manager)/../../config/navigation.yaml" ns="navigation"/>
-  <rosparam command="load" file="$(find mission_manager)/../../config/perception.yaml" ns="perception"/>
-  <rosparam command="load" file="$(find mission_manager)/../../config/voice_text.yaml" ns="voice_text"/>
-
-  <!-- 3. Mock VLM (仿真图像识别) -->
+  <!-- 2. Mock VLM (仿真图像识别) -->
   <node pkg="mission_manager" type="mock_vlm.py" name="mock_vlm" output="screen">
     <param name="task_sequence" value="$(arg task_sequence)"/>
     <param name="confidence" value="0.85"/>
   </node>
 
-  <!-- 4. 任务状态机 (仿真模式) -->
+  <!-- 3. 任务状态机 (仿真模式) -->
   <node pkg="mission_manager" type="mission_state_machine.py" name="mission_state_machine" output="screen">
     <param name="sim_mode" value="true"/>
   </node>
 
-  <!-- 5. 安全监控 -->
+  <!-- 4. 安全监控 -->
   <node pkg="mission_manager" type="safety_monitor.py" name="safety_monitor" output="screen"/>
+
+  <!-- 5. RViz 可视化 -->
+  <node pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find robot_slam)/rviz/view_navigation.rviz"/>
 
 </launch>

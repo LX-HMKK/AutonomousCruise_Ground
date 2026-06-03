@@ -4,7 +4,6 @@
 # 打开 WSL 终端，执行:
 #   bash /mnt/d/StudyWorks/3.2/MachineVision_Project/AutonomousCruise_Ground/scripts/sim_full_test.sh
 # ============================================
-set -e
 
 WS="$HOME/abot_ws"
 LOG="/tmp/sim_full.log"
@@ -14,15 +13,13 @@ echo "========================================"
 echo "  ABOT 地面巡航 — 完整仿真测试"
 echo "========================================"
 
-# 1. 清理
+# 1. 清理（必须杀掉 rosmaster，不能只杀 roscore 外壳脚本）
 echo "[1/6] 清理旧进程..."
-pkill -f roscore   2>/dev/null || true
-pkill -f roslaunch  2>/dev/null || true
-pkill -f sim_robot  2>/dev/null || true
-pkill -f mock_vlm   2>/dev/null || true
-pkill -f mission_state 2>/dev/null || true
-pkill -f safety_monitor 2>/dev/null || true
-sleep 2
+killall -9 rosmaster rosout roscore roslaunch rviz 2>/dev/null || true
+sleep 1
+# 确保 11311 端口释放
+fuser -k 11311/tcp 2>/dev/null || true
+sleep 1
 
 # 2. 同步 + 编译
 echo "[2/6] 同步源码 + 编译..."
@@ -37,18 +34,12 @@ cd "$WS"
 catkin_make 2>&1 | grep -E "Error|FAILED|Built target" | tail -3
 echo "  编译完成"
 
-# 3. 启动 roscore
-echo "[3/6] 启动 roscore..."
+# 3. 启动完整仿真 (roslaunch 自动管理 roscore)
+echo "[3/6] 启动仿真 (roslaunch 自动启动 roscore)..."
 source /opt/ros/melodic/setup.bash
 source "$WS"/devel/setup.bash
-roscore &
-sleep 4
-echo "  roscore 就绪"
-
-# 4. 启动完整仿真 (11 节点)
-echo "[4/6] 启动仿真节点..."
 roslaunch mission_manager sim_full_mission.launch > "$LOG" 2>&1 &
-sleep 15
+sleep 20  # 10 个节点启动需要时间
 
 echo ""
 echo "  === 运行中节点 ==="
@@ -59,21 +50,17 @@ NODE_COUNT=$(rosnode list 2>&1 | wc -l)
 echo "  节点数: $NODE_COUNT"
 
 # 5. 设置初始位姿 + 触发唤醒
-echo "[5/6] 设置初始位姿..."
-rostopic pub /initialpose geometry_msgs/PoseWithCovarianceStamped "
-header: {frame_id: map}
-pose:
-  pose:
-    position: {x: 1.0, y: 1.0, z: 0.0}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}" > /dev/null 2>&1
+echo "[4/6] 设置初始位姿 (x=1.0, y=1.0)..."
+# 单行格式，避免多行 heredoc 卡住
+rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped '{header: {frame_id: map}, pose: {pose: {position: {x: 1.0, y: 1.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}' 2>&1
 sleep 5
 
 echo "  触发唤醒..."
-rostopic pub /start std_msgs/String "data: 'sim_wakeup'" > /dev/null 2>&1
+rostopic pub -1 /start std_msgs/String "data: 'sim_wakeup'" 2>&1
 echo "  唤醒已发送"
 
 # 6. 监控进展
-echo "[6/6] 监控任务进展 (60s)..."
+echo "[5/6] 监控任务进展 (60s)..."
 echo "========================================"
 
 for i in $(seq 1 15); do

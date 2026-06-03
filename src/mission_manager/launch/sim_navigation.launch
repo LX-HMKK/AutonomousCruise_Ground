@@ -6,20 +6,24 @@
   <node pkg="map_server" type="map_server" name="map_server"
         args="$(find robot_slam)/maps/$(arg map_name).yaml"/>
 
-  <!-- 2. 静态 TF: laser_link 系 -->
+  <!-- 2. URDF 机器人模型 (RViz 显示需要) -->
+  <param name="robot_description" textfile="$(find abot_model)/urdf/abot_model.urdf"/>
+  <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"/>
+
+  <!-- 3. 静态 TF: laser_link 系 -->
   <node pkg="tf" type="static_transform_publisher" name="laser_tf"
         args="0.08 0 0.12 0 0 0 base_link laser_link 100"/>
 
-  <!-- 3. 仿真机器人（odom + scan + TF） -->
+  <!-- 4. 仿真机器人（odom + scan + TF） -->
   <node pkg="mission_manager" type="sim_robot.py" name="sim_robot" output="screen">
-    <param name="init_x" value="2.0"/>
-    <param name="init_y" value="2.0"/>
+    <param name="init_x" value="-1.5"/>
+    <param name="init_y" value="1.5"/>
   </node>
 
-  <!-- 4. AMCL 定位（使用 my_lab 地图参数） -->
+  <!-- 5. AMCL 定位（使用 my_lab 地图参数） -->
   <include file="$(find robot_slam)/launch/include/amcl.launch.xml"/>
 
-  <!-- 5. move_base 导航栈 -->
+  <!-- 6. move_base 导航栈 -->
   <include file="$(find robot_slam)/launch/include/move_base.launch.xml"/>
 
 </launch>
