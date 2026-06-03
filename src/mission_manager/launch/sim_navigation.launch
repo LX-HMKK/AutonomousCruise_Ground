@@ -1,0 +1,25 @@
+<launch>
+  <!-- 完整仿真导航测试：mock 硬件 + 导航栈 + 测试目标点 -->
+  <arg name="map_name" default="my_lab"/>
+
+  <!-- 1. 先验地图 -->
+  <node pkg="map_server" type="map_server" name="map_server"
+        args="$(find robot_slam)/maps/$(arg map_name).yaml"/>
+
+  <!-- 2. 静态 TF: laser_link 系 -->
+  <node pkg="tf" type="static_transform_publisher" name="laser_tf"
+        args="0.08 0 0.12 0 0 0 base_link laser_link 100"/>
+
+  <!-- 3. 仿真机器人（odom + scan + TF） -->
+  <node pkg="mission_manager" type="sim_robot.py" name="sim_robot" output="screen">
+    <param name="init_x" value="2.0"/>
+    <param name="init_y" value="2.0"/>
+  </node>
+
+  <!-- 4. AMCL 定位（使用 my_lab 地图参数） -->
+  <include file="$(find robot_slam)/launch/include/amcl.launch.xml"/>
+
+  <!-- 5. move_base 导航栈 -->
+  <include file="$(find robot_slam)/launch/include/move_base.launch.xml"/>
+
+</launch>

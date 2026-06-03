@@ -1,4 +1,4 @@
-image: /home/abot/lidar_ws/src/abot_slam/maps/my_lab.pgm
+image: my_lab.pgm
 resolution: 0.050000
 origin: [-1.000000, -13.800000, 0.000000]
 negate: 0

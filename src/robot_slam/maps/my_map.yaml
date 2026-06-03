@@ -1,4 +1,4 @@
-image: /home/bcsh/sim_ws/src/robot_slam/maps/my_map.pgm
+image: my_map.pgm
 resolution: 0.010000
 origin: [-10.000000, -10.000000, 0.000000]
 negate: 0
