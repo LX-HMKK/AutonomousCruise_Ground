@@ -1,6 +1,6 @@
 <launch>
   <!-- 完整仿真导航测试：mock 硬件 + 导航栈 + 测试目标点 -->
-  <arg name="map_name" default="my_lab"/>
+  <arg name="map_name" default="competition_field"/>
 
   <!-- 1. 先验地图 -->
   <node pkg="map_server" type="map_server" name="map_server"
