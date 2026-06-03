@@ -14,15 +14,18 @@
     <param name="confidence" value="0.85"/>
   </node>
 
-  <!-- 3. 任务状态机 (仿真模式) -->
+  <!-- 3. Mock TTS (仿真语音播报) -->
+  <node pkg="mission_manager" type="mock_tts.py" name="mock_tts" output="screen"/>
+
+  <!-- 4. 任务状态机 (仿真模式) -->
   <node pkg="mission_manager" type="mission_state_machine.py" name="mission_state_machine" output="screen">
     <param name="sim_mode" value="true"/>
   </node>
 
-  <!-- 4. 安全监控 -->
+  <!-- 5. 安全监控 -->
   <node pkg="mission_manager" type="safety_monitor.py" name="safety_monitor" output="screen"/>
 
-  <!-- 5. RViz 可视化 -->
+  <!-- 6. RViz 可视化 -->
   <node pkg="rviz" type="rviz" name="rviz"
         args="-d $(find robot_slam)/rviz/view_navigation.rviz"/>
 

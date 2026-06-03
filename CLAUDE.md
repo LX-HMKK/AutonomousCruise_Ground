@@ -38,7 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 运行测试：`catkin_make run_tests`
 - 运行单个测试：`catkin_make run_tests --pkg <package_name>`
 - Source 环境：`source abot_ws/devel/setup.bash`
-- 启动完整仿真（推荐，9 个节点）：
+- 启动完整仿真（推荐，10 个节点）：
   ```bash
   source /opt/ros/melodic/setup.bash && source ~/abot_ws/devel/setup.bash && roslaunch mission_manager sim_full_mission.launch
   ```

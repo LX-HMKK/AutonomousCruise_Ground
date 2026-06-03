@@ -143,6 +143,11 @@ class MissionStateMachine(object):
         rospy.Subscriber('/safety_status', String, self._on_safety_status)
         rospy.Subscriber('/abot/pose', PoseStamped, self._on_pose)
         rospy.Subscriber('/odom', Odometry, self._on_odom)
+        rospy.Subscriber('/tts_done', String, self._on_tts_done)
+
+        # TTS 播报完成事件
+        self.tts_done_event = threading.Event()
+        self.tts_done_event.set()  # 初始非等待状态
 
         # 心跳定时器 (2s 间隔，独立于主循环，防止安全监控误判超时)
         self.heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._publish_heartbeat)
@@ -270,6 +275,11 @@ class MissionStateMachine(object):
         q = msg.pose.pose.orientation
         _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
         self.current_pose = (msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
+
+    def _on_tts_done(self, msg):
+        """TTS 播报完成回调。"""
+        rospy.loginfo('[Mission] TTS done signal received')
+        self.tts_done_event.set()
 
     def _get_current_pose(self):
         """返回最新的机器人位姿 (x, y, yaw)，若无数据则返回 (None, None, None)。"""
@@ -597,20 +607,33 @@ class MissionStateMachine(object):
     # ========== Helpers ==========
 
     def _speak(self, text):
-        """发送 TTS 播报。播报前强制停车，等待稳定后播报。"""
+        """发送 TTS 播报，等待播报完成信号后返回。
+        播报期间机器人保持停止。仿真下 10s 超时，实车 20s 超时。"""
         self._stop_robot()
         hold_s = self.mission_cfg['mission'].get('voice_static_hold_s', 0.5)
         rospy.sleep(hold_s)
+
+        # 清除上一次的完成事件
+        self.tts_done_event.clear()
+
         try:
             msg = String()
             msg.data = text
             self.voice_pub.publish(msg)
         except Exception as e:
             rospy.logerr('[Mission] TTS publish failed: %s', str(e))
+
         rospy.loginfo('[Mission] TTS: %s', text)
-        # 等待播报完成（仿真下缩短）
-        sleep_s = 1.0 if self.sim_mode else 2.0
-        rospy.sleep(sleep_s)
+
+        # 等待 TTS 完成信号
+        timeout = 10.0 if self.sim_mode else 20.0
+        done = self.tts_done_event.wait(timeout)
+        if done:
+            rospy.loginfo('[Mission] TTS completed: %s', text[:30])
+        else:
+            rospy.logwarn('[Mission] TTS timeout (%.1fs), proceeding anyway', timeout)
+
+        self._stop_robot()
 
     def _stop_robot(self):
         """确保机器人完全停止。"""
