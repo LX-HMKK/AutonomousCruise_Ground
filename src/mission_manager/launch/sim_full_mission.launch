@@ -26,9 +26,5 @@
   <node pkg="rviz" type="rviz" name="rviz"
         args="-d $(find robot_slam)/rviz/view_navigation.rviz"/>
 
-  <!-- 6. 仿真自动唤醒（延迟 8s 等节点就绪后发 sim_wakeup） -->
-  <node pkg="rostopic" type="rostopic" name="auto_wakeup"
-        args="pub -1 /start std_msgs/String 'data: sim_wakeup'"
-        launch-prefix="bash -c 'sleep 8; $0 $@'"/>
 
 </launch>

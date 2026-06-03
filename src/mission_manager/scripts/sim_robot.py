@@ -97,9 +97,21 @@ class SimRobot(object):
         self.scan_pub.publish(msg)
 
     def _publish_tf(self):
-        """发布 TF：odom -> base_footprint -> base_link。"""
+        """发布 TF：map -> odom (直通，仿真定位) + odom -> base_footprint。"""
         now = rospy.Time.now()
         q = tf.transformations.quaternion_from_euler(0, 0, self.yaw)
+
+        # map -> odom: 仿真下直接发布 identity，跳过 AMCL 定位
+        # 这意味着 map 和 odom 坐标系重合，机器人 odom 位姿就是 map 位姿
+        t_map = TransformStamped()
+        t_map.header.stamp = now
+        t_map.header.frame_id = 'map'
+        t_map.child_frame_id = 'odom'
+        t_map.transform.translation.x = 0.0
+        t_map.transform.translation.y = 0.0
+        t_map.transform.translation.z = 0.0
+        t_map.transform.rotation = Quaternion(0, 0, 0, 1)
+        self.tf_br.sendTransformMessage(t_map)
 
         # odom -> base_footprint
         t = TransformStamped()
