@@ -440,11 +440,52 @@ class MissionStateMachine(object):
         self.transition(MissionState.task_image_state(phase, 'ARRIVE_TASK'))
 
     def _handle_arrive_task(self, phase):
-        timeout = rospy.Duration(self.mission_cfg['timeouts'].get('navigation_goal_timeout_s', 60))
-        arrived = self.move_base_client.wait_for_result(timeout)
+        timeout_s = self.mission_cfg['timeouts'].get('navigation_goal_timeout_s', 60)
+        stuck_timeout = self.mission_cfg['timeouts'].get('nav_stuck_timeout_s', 10.0)
+        deadline = time.time() + timeout_s
+
+        # Polling loop: 每 2s 检查导航进度，检测卡死
+        last_x, last_y, last_yaw = None, None, None
+        stuck_since = None
+        check_interval = 2.0
+
+        while time.time() < deadline:
+            state = self.move_base_client.get_state()
+            if state in (GoalStatus.SUCCEEDED, GoalStatus.ABORTED,
+                         GoalStatus.REJECTED, GoalStatus.RECALLED,
+                         GoalStatus.PREEMPTED, GoalStatus.LOST):
+                break
+
+            # 检查运动进度（卡死检测）
+            rx, ry, ryaw = self._get_current_pose()
+            if rx is not None and last_x is not None:
+                dist = ((rx - last_x)**2 + (ry - last_y)**2) ** 0.5
+                if dist < 0.02:  # 2cm 以内 = 未移动
+                    if stuck_since is None:
+                        stuck_since = time.time()
+                    elif time.time() - stuck_since > stuck_timeout:
+                        rospy.logwarn('[Mission] Phase %d: Robot stuck (no progress for %.1fs)',
+                                      phase, stuck_timeout)
+                        self.move_base_client.cancel_goal()
+                        break
+                else:
+                    stuck_since = None  # 机器人仍在移动
+            last_x, last_y, last_yaw = rx, ry, ryaw
+
+            rospy.sleep(check_interval)
+
+        state = self.move_base_client.get_state()
+        arrived = (state == GoalStatus.SUCCEEDED)
 
         if not arrived:
-            rospy.logwarn('[Mission] Phase %d: Navigation timeout', phase)
+            if state == GoalStatus.SUCCEEDED:
+                pass  # should not happen, handled above
+            elif stuck_since is not None and time.time() - (stuck_since or time.time()) > stuck_timeout:
+                rospy.logwarn('[Mission] Phase %d: Navigation stuck, retrying', phase)
+            else:
+                rospy.logwarn('[Mission] Phase %d: Navigation failed (state=%d, timeout)',
+                              phase, state)
+
             self.navigation_retry_count += 1
             max_retries = self.mission_cfg['timeouts']['navigation_retry_limit']
             if self.navigation_retry_count <= max_retries:

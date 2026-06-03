@@ -17,6 +17,7 @@ timeouts:
   perception_retry_limit: 3
   navigation_retry_limit: 2
   navigation_goal_timeout_s: 60
+  nav_stuck_timeout_s: 10.0
 
 confidence:
   min_confidence: 0.6

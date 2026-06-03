@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+### M6 — 鲁棒性增强 (2026-06-03)
+
+#### Added
+- 导航卡死检测：`_handle_arrive_task` 改用轮询循环，每 2s 检查 robot 位移，超过 `nav_stuck_timeout_s`(10s) 无进展则取消导航并重试
+- `mission.yaml` 新增 `nav_stuck_timeout_s` 参数
+
+#### Changed
+- 导航等待从阻塞 `wait_for_result()` 改为轮询循环，支持实时进度监控
+
+### M5 — 全链路就绪 (2026-06-03)
+
+- Game 地图（1056×992px, x∈[-15.4,11.0], y∈[-13.8,11.0]）已接入仿真
+- 3.6m 比赛场地位于 map origin，task cells 均在地图可通行范围内
+- 需用户在 WSL 中运行 `roslaunch mission_manager sim_full_mission.launch` 验证
+
+### M4 — 语音播报完成回调 (2026-06-03)
+
+#### Added
+- `mock_tts.py`：Mock TTS 仿真节点，订阅 `/voiceWords`，按字数估算时长，完成后发布 `/tts_done`
+- `_speak()` 改为 `tts_done_event.wait()` 阻塞等待播报完成，替代固定 `rospy.sleep`
+- 播报期间机器人保持停止，超时 10s(sim)/20s(real)
+
+#### Changed
+- `sim_full_mission.launch` 节点数 9→10，新增 mock_tts
+
+### 仓库裁剪 (2026-06-03)
+
+#### Removed
+- 功能包：user_demo, abot_find, hector_slam, imu_filter（与本次比赛无关）
+- 脚本：8 个远端 ABOT 旧 sh + 18 个旧 Python（AR标签/射击/demo/旧导航）
+
 ### M3 仿真调试 — 关键修复 (2026-06-03)
 
 #### Fixed
