@@ -13,6 +13,7 @@ import threading
 
 from std_msgs.msg import String, Empty
 from geometry_msgs.msg import PoseStamped, Twist
+from nav_msgs.msg import Odometry
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from actionlib_msgs.msg import GoalStatus
 import actionlib
@@ -109,6 +110,7 @@ class MissionStateMachine(object):
         self.mission_start_time = time.time()
         self.perception_retry_count = 0
         self.navigation_retry_count = 0
+        self.finish_nav_retry_count = 0
         self.recognition_in_progress = False
         self.rotation_attempt = 0
         self.seen_image_ids = []  # 已识别的图像 ID，防止重复
@@ -138,6 +140,7 @@ class MissionStateMachine(object):
         rospy.Subscriber('/vision_result', String, self._on_vision_result)
         rospy.Subscriber('/safety_status', String, self._on_safety_status)
         rospy.Subscriber('/abot/pose', PoseStamped, self._on_pose)
+        rospy.Subscriber('/odom', Odometry, self._on_odom)
 
         # 心跳定时器 (2s 间隔，独立于主循环，防止安全监控误判超时)
         self.heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._publish_heartbeat)
@@ -257,6 +260,14 @@ class MissionStateMachine(object):
         _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
         self.current_pose = (msg.pose.position.x, msg.pose.position.y, yaw)
 
+    def _on_odom(self, msg):
+        """接收里程计数据，作为备选位姿来源（仿真用）。"""
+        if self.current_pose is not None:
+            return  # /abot/pose 优先级更高
+        q = msg.pose.pose.orientation
+        _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
+        self.current_pose = (msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
+
     def _get_current_pose(self):
         """返回最新的机器人位姿 (x, y, yaw)，若无数据则返回 (None, None, None)。"""
         if self.current_pose is not None:
@@ -339,19 +350,21 @@ class MissionStateMachine(object):
             self.cmd_vel_pub.publish(twist)
             rospy.sleep(0.1)
             # 如果识别线程已经得到结果，提前停止旋转
-            if self.vision_result_event.is_set() and not self.recognition_in_progress:
+            if self.vision_result_event.is_set():
                 break
 
         # 停止旋转
         self._stop_robot()
         rospy.sleep(0.5)
 
+        # 先标记识别进行中并清除事件，再触发相机，防止竞态导致结果丢失
+        self.recognition_in_progress = True
+        self.vision_result_event.clear()
+
         # 触发相机拍照
         rospy.set_param('/top_view_shot_node/im_flag', 1)
         rospy.loginfo('[Mission] Phase %d: Camera triggered at orientation %d/4',
                       phase, self.rotation_attempt + 1)
-
-        self.recognition_in_progress = True
 
         # 等待识别结果（在 _handle_recognize_task_image 中处理超时）
         self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
@@ -502,12 +515,33 @@ class MissionStateMachine(object):
     def _handle_arrive_finish(self):
         timeout = rospy.Duration(self.mission_cfg['timeouts'].get('navigation_goal_timeout_s', 60))
         arrived = self.move_base_client.wait_for_result(timeout)
+
         if not arrived:
-            rospy.logwarn('[Mission] Finish navigation timeout or did not succeed')
+            rospy.logwarn('[Mission] Finish navigation timeout')
+            self.finish_nav_retry_count += 1
+            max_retries = self.mission_cfg['timeouts']['navigation_retry_limit']
+            if self.finish_nav_retry_count <= max_retries:
+                rospy.loginfo('[Mission] Finish nav retry %d/%d',
+                              self.finish_nav_retry_count, max_retries)
+                self.transition(MissionState.NAVIGATE_TO_FINISH)
+                return
+            else:
+                rospy.logwarn('[Mission] Max finish nav retries exceeded, proceeding anyway')
+        elif self.move_base_client.get_state() != GoalStatus.SUCCEEDED:
+            rospy.logwarn('[Mission] Finish navigation did not succeed (state=%d)',
+                          self.move_base_client.get_state())
+            self.finish_nav_retry_count += 1
+            max_retries = self.mission_cfg['timeouts']['navigation_retry_limit']
+            if self.finish_nav_retry_count <= max_retries:
+                rospy.loginfo('[Mission] Finish nav retry %d/%d',
+                              self.finish_nav_retry_count, max_retries)
+                self.transition(MissionState.NAVIGATE_TO_FINISH)
+                return
+            else:
+                rospy.logwarn('[Mission] Max finish nav retries exceeded, proceeding anyway')
         else:
-            if self.move_base_client.get_state() != GoalStatus.SUCCEEDED:
-                rospy.logwarn('[Mission] Finish navigation did not succeed (state=%d)',
-                              self.move_base_client.get_state())
+            self.finish_nav_retry_count = 0
+
         self._stop_robot()
         self.transition(MissionState.FINISH_ANNOUNCE)
 

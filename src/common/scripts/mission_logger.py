@@ -16,8 +16,12 @@ class MissionLogger(object):
             base_dir = os.path.expanduser('~/abot_ws/logs')
         run_id = datetime.now().strftime('run_%Y%m%d_%H%M%S')
         self.run_dir = os.path.join(base_dir, run_id)
-        if not os.path.isdir(self.run_dir):
+        try:
             os.makedirs(self.run_dir)
+        except OSError:
+            # Directory already exists (race condition with other nodes)
+            if not os.path.isdir(self.run_dir):
+                raise
         self._lock = threading.Lock()
 
     def _append(self, filename, record):
