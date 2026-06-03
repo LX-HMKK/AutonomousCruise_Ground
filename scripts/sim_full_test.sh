@@ -40,8 +40,9 @@ cd "$WS"
 catkin_make 2>&1 | grep -E "Error|FAILED|Built target" | tail -3
 echo "  编译完成"
 
-# 3. 启动完整仿真 (roslaunch 自动管理 roscore)
-echo "[3/6] 启动仿真 (roslaunch 自动启动 roscore)..."
+# 3. 启动完整仿真 (用非标准端口避免 TIME_WAIT，roslaunch 自动管理 roscore)
+echo "[3/6] 启动仿真..."
+export ROS_MASTER_URI=http://localhost:11312  # 避免 11311 TIME_WAIT 等待 60s
 source /opt/ros/melodic/setup.bash
 source "$WS"/devel/setup.bash
 roslaunch mission_manager sim_full_mission.launch > "$LOG" 2>&1 &
