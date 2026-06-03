@@ -25,26 +25,20 @@ cp "$SRC"/config/*.yaml "$WS"/config/ 2>/dev/null || true
 cp "$SRC"/src/robot_slam/maps/competition_field.* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
 T1=$(date +%s); echo "  sync: $((T1-T0))s"
 
-# 3. 启动 roscore + 仿真
-echo "[3/5] 启动 roscore..."
+# 3. 启动仿真 (roslaunch 自动管理 roscore，用 rostopic 检查比 rosnode list 更快)
+echo "[3/5] 启动仿真..."
 source /opt/ros/melodic/setup.bash
-export ROS_MASTER_URI=http://localhost:11313
-pkill -9 rosmaster 2>/dev/null || true
-sleep 1
-roscore > /tmp/roscore.log 2>&1 &
-sleep 4
-T2=$(date +%s); echo "  roscore: $((T2-T1))s"
-
-echo "[3/5] 启动仿真节点..."
 source "$WS"/devel/setup.bash
+# 换随机端口避免 TIME_WAIT
+export ROS_MASTER_URI=http://localhost:0
 roslaunch mission_manager sim_full_mission.launch > "$LOG" 2>&1 &
-sleep 15
-T3=$(date +%s); echo "  launch: $((T3-T2))s"
+sleep 20
+T3=$(date +%s); echo "  launch wait: $((T3-T1))s (total)"
 
 echo ""
-echo "  === 运行中节点 (timeout 5s) ==="
-timeout 5 rosnode list 2>&1 || echo "(超时跳过)"
-T4=$(date +%s); echo "  total startup: $((T4-T1))s"
+echo "  === 节点进程 ==="
+# 从 log 文件读节点列表（不依赖 rosnode，避免 XML-RPC 超时卡死）
+grep "process\[" "$LOG" 2>/dev/null | grep "started with pid" | sed "s/.*process\[//;s/\].*//" || echo "(读取中...)"
 echo ""
 
 # 4. 初始位姿 + 唤醒
@@ -73,13 +67,13 @@ echo ""
 echo "========================================"
 echo "  仿真测试报告 (总耗时: $((TOTAL_END-TOTAL_START))s)"
 echo "========================================"
-echo "节点状态:"
-timeout 5 rosnode list 2>&1 || echo "(超时)"
+echo "节点进程:"
+grep "process\[" "$LOG" 2>/dev/null | grep "started with pid" | sed "s/.*process\[//;s/\].*//"
 echo ""
-echo "任务日志:"
-grep -i "->\|Navigating\|Arrived\|Recogni\|cell\|DONE\|ABORT" "$LOG" 2>/dev/null | tail -20
+echo "任务日志 (最近 20 行):"
+strings "$LOG" 2>/dev/null | grep -iE "->|Navigating|Arrived|Recogni|cell|DONE|ABORT|Mission|Phase|vision" | tail -20
 echo ""
-grep -iE "ABORT|Traceback|FATAL" "$LOG" 2>/dev/null | grep -v "Unable" | head -10 || echo "(无严重错误)"
+strings "$LOG" 2>/dev/null | grep -iE "ABORT|Traceback|FATAL|ERROR" | grep -v "Unable" | tail -10 || echo "(无严重错误)"
 echo ""
 echo "完整日志: $LOG"
 echo "按 Enter 停止..."
