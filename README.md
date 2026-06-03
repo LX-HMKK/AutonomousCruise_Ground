@@ -134,19 +134,18 @@ catkin_make
 source devel/setup.bash
 ```
 
-### 启动仿真任务
+### 启动仿真任务（WSL 一键启动）
 
 ```bash
-source ~/abot_ws/devel/setup.bash
-roslaunch mission_manager sim_mission.launch sim_mode:=true
+source /opt/ros/melodic/setup.bash && source ~/abot_ws/devel/setup.bash && roslaunch mission_manager sim_full_mission.launch
 ```
 
-仿真模式下，发布 `sim_wakeup` 到 `/start` topic 触发比赛开始。
+自动启动全部 9 个节点（map_server + robot_state_publisher + sim_robot + move_base + mock_vlm + 状态机 + 安全监控 + RViz），5 秒后自动唤醒开始比赛流程。
 
 ### 启动完整比赛（实车）
 
 ```bash
-roslaunch launch/ground_cruise.launch sim_mode:=false map_name:=my_lab
+roslaunch launch/ground_cruise.launch sim_mode:=false map_name:=competition_field
 ```
 
 ### 修改比赛参数

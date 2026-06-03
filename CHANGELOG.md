@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### M3 仿真调试 — 关键修复 (2026-06-03)
+
+#### Fixed
+- rosnode list XML-RPC 调用无超时卡 134s — 改为从 log 文件读取节点进程
+- 端口 11311 TIME_WAIT 60s — 改随机端口 + tcp_tw_reuse
+- launch-prefix 语法不兼容 — 状态机内置 sim_mode 5s 自动唤醒
+- Python 2 ASCII 编码崩溃 — 所有脚本加 `sys.setdefaultencoding('utf-8')`
+- sim_robot 起点 (-1.5,1.5) 在地图外 — 改为 (0,0) + 创建 competition_field 地图
+- map→odom TF 缺失 — sim_robot 发布 identity transform
+- 安全监控不检测角运动 — _on_odom 增加 yaw 变化判断
+- 安全监控 heartbeat 时机 — 改为 rospy.Timer(2s) 独立线程
+- 导航结果订阅类型错误 — String 改为 SimpleActionClient.wait_for_result
+- 感知重试计数器无限重置 — 移到任务切换时重置
+- mission_logger 并发崩溃 — os.makedirs 加 try/except
+- /abot/pose 仿真无发布者 — 增加 /odom 备选位姿源
+
+#### Changed
+- 仿真启动从复杂脚本简化为单条 roslaunch 命令
+- 默认地图从 my_lab 改为 competition_field（3.6m×3.6m 场地）
+
 ### M3 — 任务图像识别完善 (2026-06-03)
 
 #### Added
