@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **环境**：Windows WSL Ubuntu 18.04，ROS Melodic，catkin 工作空间
 - **仿真方式**：先验地图模拟导航，mock 数据模拟图像/语音
 - 所有修改优先在本机 `abot_ws/` 完成并验证
+- **代码源路径**：仓库位于 Windows 文件系统 (`D:\StudyWorks\...`)，运行时需同步到 WSL 的 `~/abot_ws/src/`（Python 脚本可直接 cp，C++ 需 `catkin_make`）
 
 ### 远端验证（临时）
 
@@ -36,10 +37,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 运行测试：`catkin_make run_tests`
 - 运行单个测试：`catkin_make run_tests --pkg <package_name>`
 - Source 环境：`source abot_ws/devel/setup.bash`
-- 启动仿真任务（M1 起可用）：
+- 启动完整仿真（推荐，9 个节点）：
   ```bash
-  source abot_ws/devel/setup.bash
-  roslaunch mission_manager sim_mission.launch
+  source /opt/ros/melodic/setup.bash && source ~/abot_ws/devel/setup.bash && roslaunch mission_manager sim_full_mission.launch
+  ```
+- 仅启动导航仿真测试（4 个节点，无 VLM/状态机）：
+  ```bash
+  roslaunch mission_manager sim_navigation.launch map_name:=competition_field
   ```
 
 ## 文档维护规则
@@ -90,8 +94,15 @@ docs(config): 补充比赛场地配置文件说明
 │   └── voice_text.yaml         # 播报文本模板（12 条，支持 {index}/{target_cell} 变量）
 ├── src/
 │   ├── mission_manager/        # 【新建】任务状态机 + 安全监控（今年核心模块）
-│   │   ├── mission_state_machine.py  # 完整状态机：IDLE→WAKEUP→识别×4→导航×4→播报×4→终点→DONE
-│   │   └── safety_monitor.py         # 激光碰撞检测/里程计运动监控/heartbeat watchdog/急停
+│   │   ├── launch/
+│   │   │   ├── sim_full_mission.launch  # 完整仿真（导航+VLM+状态机+安全+RViz）推荐
+│   │   │   ├── sim_navigation.launch    # 仅导航仿真（无 VLM/状态机）
+│   │   │   └── sim_mission.launch       # 仅状态机+安全（需外启导航栈）
+│   │   ├── scripts/
+│   │   │   ├── mission_state_machine.py # 完整状态机 (648 行)：IDLE→WAKEUP→识别×4→导航×4→播报×4→终点→DONE
+│   │   │   ├── safety_monitor.py        # 激光碰撞检测/里程计运动监控/heartbeat watchdog/急停
+│   │   │   ├── mock_vlm.py              # Mock VLM 仿真：按预设序列发布 /vision_result
+│   │   │   └── sim_robot.py             # 仿真机器人：odom + scan + TF + 订阅 cmd_vel
 │   ├── common/                 # 【新建】公共工具包
 │   │   ├── config_loader.py    # YAML 配置加载、网格坐标→map 坐标转换、footprint 区域判定
 │   │   └── mission_logger.py   # JSONL 结构化日志（按 run_YYYYMMDD_HHMMSS 组织）
@@ -122,6 +133,8 @@ docs(config): 补充比赛场地配置文件说明
 │   ├── mapping.sh              # 模式一：键盘控制建图（8 个节点）
 │   ├── navigation_test.sh      # 模式二：预设路径导航（10 个节点）
 │   ├── competition.sh          # 模式三：完整比赛（14 个节点）
+│   ├── sim_full_test.sh        # WSL 仿真完整测试（含定时诊断）
+│   ├── wsl_verify_nav.sh       # WSL 导航栈快速验证（注意：含 rosnode list 会卡）
 │   └── *.sh                    # 其他：远端 ABOT 启动脚本（参考）
 ├── tests/                      # 单元测试与仿真测试（待建）
 ├── logs/                       # 运行日志（按 run_YYYYMMDD_HHMMSS 组织，gitignore）
@@ -199,7 +212,7 @@ mission_state_machine ──/voiceWords──→ TTS 播报
 safety_monitor ──/safety_status──→ mission_state_machine
 ```
 
-启动：`./scripts/competition.sh [地图名] [sim_mode]
+启动：``./scripts/competition.sh [地图名] [sim_mode]``
 
 ### 核心模块职责与数据流
 
@@ -216,6 +229,21 @@ safety_monitor ──/safety_status──→ mission_state_machine
 3. **Perception**：搜索围栏内侧任务信息图像，识别内容并输出目标任务点编号 + 置信度。低置信度结果不得直接导航，需重识别或确认。
 4. **Voice I/O**：播报接口返回"开始/完成/失败"状态；Mission Manager 仅在播报完成后进入下一状态；播报时机器人完全停止。
 5. **Safety**：每个关键模块有 heartbeat；状态机有 watchdog；导航卡死触发恢复策略而非无限等待。
+
+### 开发陷阱与已知问题
+
+以下问题是 M3 仿真调试中踩过的坑，修改代码时必须注意：
+
+| 陷阱 | 表现 | 解决方案 |
+|---|---|---|
+| `rosnode list` | XML-RPC 无超时，卡死 134s | 用 `grep "process\[" log_file` 替代，从日志文件读取节点进程 |
+| Python 2 中文编码 | YAML 配置含中文时崩溃 | 每个 `.py` 文件头部加 `reload(sys); sys.setdefaultencoding('utf-8')` |
+| ROS 端口冲突 | 11311 端口 TIME_WAIT 60s | 启动前 `export ROS_MASTER_URI=http://localhost:0` 使用随机端口 |
+| map→odom TF 缺失 | 导航栈无路径规划 | `sim_robot.py` 必须发布 `map→odom` identity transform |
+| 仿真唤醒 | 状态机等待 /start 不启动 | `sim_mode=true` 下状态机 5s 后自动唤醒，无需手动发 `/start` |
+| 起点在地图外 | AMCL 粒子群发散 | `competition_field` 地图尺寸 3.6m，起点应设在 (0, 0) 附近 |
+| 安全监控不检测角运动 | 机器人原地旋转不触发监控 | `_on_odom` 回调中增加 yaw 变化判断 |
+| heartbeat 时机 | rospy.spin 阻塞不执行心跳 | 用 `rospy.Timer(2s)` 独立线程发送 heartbeat |
 
 ### 关键设计原则
 
