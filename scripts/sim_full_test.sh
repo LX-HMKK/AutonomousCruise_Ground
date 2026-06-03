@@ -13,13 +13,19 @@ echo "========================================"
 echo "  ABOT 地面巡航 — 完整仿真测试"
 echo "========================================"
 
-# 1. 清理（必须杀掉 rosmaster，不能只杀 roscore 外壳脚本）
-echo "[1/6] 清理旧进程..."
+# 1. 清理（彻底释放 11311 端口，避免 TIME_WAIT 导致 roslaunch 等待 60s）
+echo "[1/6] 清理旧进程 + 等待端口释放..."
 killall -9 rosmaster rosout roscore roslaunch rviz 2>/dev/null || true
 sleep 1
-# 确保 11311 端口释放
-fuser -k 11311/tcp 2>/dev/null || true
-sleep 1
+# 轮询等待 11311 端口释放（TIME_WAIT 最长 60s，这里最多等 30s）
+for i in $(seq 1 15); do
+    if ss -tln | grep -q 11311 2>/dev/null; then
+        echo "  等待端口释放... (${i}s)"
+        sleep 2
+    else
+        break
+    fi
+done
 
 # 2. 同步 + 编译
 echo "[2/6] 同步源码 + 编译..."
@@ -43,10 +49,17 @@ sleep 10  # 等待节点就绪
 
 echo ""
 echo "  === 运行中节点 ==="
-rosnode list 2>&1
+# 重试 rosnode list（master 刚启动可能连不上）
+for i in $(seq 1 5); do
+    if NODES=$(rosnode list 2>/dev/null); then
+        echo "$NODES"
+        break
+    fi
+    sleep 2
+done
 echo ""
 
-NODE_COUNT=$(rosnode list 2>&1 | wc -l)
+NODE_COUNT=$(echo "$NODES" | wc -l)
 echo "  节点数: $NODE_COUNT"
 
 # 5. 设置初始位姿 + 触发唤醒
