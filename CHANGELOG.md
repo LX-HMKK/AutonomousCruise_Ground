@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### M7+ — 代码审计修复 (2026-06-04)
+
+#### Fixed
+- H1: `_handle_arrive_task` 中 footprint 硬编码改为从 `robot.yaml` 配置读取，带 fallback 默认值
+- H2: `_handle_abort` 补全 6 种 abort 类型的语音播报文本映射（原来只覆盖 2 种，新增 `abort_localization_lost`/`abort_perception_failed`/`abort_navigation_failed`/`abort_manual_stop`）
+- H3: 引用 `voice_text.yaml` 中 5 个已定义但未使用的模板（`wakeup_detected`/`task_image_recognized`/`task_image_failed`/`navigating_to_task`/`finish_arrived`）
+- H3 附带修复: `_retry_perception` 播报顺序 — max_retries 耗尽时不再误导性播报"正在重试"
+- H3 附带修复: 移除 `_handle_finish_announce` 与 `_handle_arrive_finish` 之间的"比赛结束"重复播报
+- M1: `mission_logger.py` 添加 Python 2 UTF-8 编码兼容头
+- M2: `_on_safety_status` 改为精确 `==` 匹配 `ESTOP:<reason>`，避免子串误匹配
+- M3: `_handle_arrive_task` 导航重试前显式 `cancel_goal()`，与超限分支保持一致
+- M4: `_handle_arrive_finish` 导航重试前显式 `cancel_goal()`，与超限分支保持一致
+- L2: `mock_tts.py` 添加 Python 2 UTF-8 编码兼容头
+
+#### Changed
+- `_handle_start_announce` 播报模板从 `start` 改为 `wakeup_detected`
+
 ### M6 — 鲁棒性增强 (2026-06-03)
 
 #### Added
