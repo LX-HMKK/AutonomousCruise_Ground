@@ -1,12 +1,10 @@
 #!/bin/bash
 # ============================================
-# 模式二：预设路径导航
-# 用途：加载先验地图，按预设路径点顺序导航，验证导航精度
-#
-# 节点列表 (10个):
-#   roscore + abot_driver + abot_imu + rplidar
-#   + box_filter + robot_state_publisher + robot_pose_ekf
-#   + map_server + amcl + move_base + multi_goals.py
+# 模式 2：纯导航测试
+# 用途: 加载先验地图, 按预设路径点顺序导航, 验证导航精度
+#   用法: bash scripts/navigation_test.sh [地图名] [路径脚本]
+#   节点: roscore + bringup(IMU) + nav(AMCL+map+move_base) + multi_goals + RViz
+#   无视觉/语音/唤醒词
 # ============================================
 
 WS_PATH="${HOME}/abot_ws"

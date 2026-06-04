@@ -1,34 +1,36 @@
 #!/bin/bash
 # ============================================
-# 模式三：完整比赛模式
-# 用途：启动全部节点，运行地面巡航完整比赛流程
+# 模式 1 / 模式 3：完整比赛 / 导航+视觉+语音
 #
-# 节点列表 (14个):
-#   roscore + abot_driver + abot_imu + rplidar
-#   + box_filter + robot_state_publisher + robot_pose_ekf
-#   + map_server + amcl
-#   + move_base + game_node(Snowboy唤醒)
-#   + vlm_node(豆包VLM) + mission_state_machine + safety_monitor
+# 模式 1 (sim_mode=false): 完整比赛 — Snowboy 唤醒 + 导航 + 豆包VLM + TTS播报
+#   用法: bash scripts/competition.sh game false
+#   节点: roscore + bringup(IMU) + nav(AMCL+map+move_base) + GameStart(Snowboy)
+#         + VLM(doubao) + TTS(doubao) + state_machine(sim_mode=false) + safety
+#
+# 模式 3 (sim_mode=true):  导航+视觉+语音 — 无唤醒词, 5s 自动开始
+#   用法: bash scripts/competition.sh game true
+#   节点: 同上但不启动 GameStart, 状态机 5s 后自动进入流程
 #
 # 数据流:
-#   game_node --/start--> mission_state_machine
+#   game_node --/start--> mission_state_machine  (仅模式1)
 #   vlm_node  --/vision_result--> mission_state_machine
-#   mission_state_machine --/voiceWords--> TTS
+#   mission_state_machine --/voiceWords--> doubao_tts → /tts_done
 #   mission_state_machine --move_base action--> 导航
 #   safety_monitor --/safety_status--> mission_state_machine
 # ============================================
 
 WS_PATH="${HOME}/abot_ws"
 MAP_NAME="${1:-game}"
-SIM_MODE="${2:-false}"  # 实车默认等待 Snowboy 唤醒; WSL 测试时传 true
+SIM_MODE="${2:-false}"  # false=模式1(唤醒词)  true=模式3(自动开始)
+
+MODE_NAME="模式1: 完整比赛"
+[ "${SIM_MODE}" = "true" ] && MODE_NAME="模式3: 导航+视觉+语音"
 
 echo "========================================"
-echo "  ABOT 地面巡航 — 完整比赛模式"
+echo "  ABOT 地面巡航 — ${MODE_NAME}"
 echo "========================================"
 echo "地图:     ${MAP_NAME}"
-echo "仿真:     ${SIM_MODE}"
-echo "节点数:   14"
-echo "总时长:   180s (max)"
+echo "节点数:   $([ "${SIM_MODE}" = "true" ] && echo '11 (无唤醒词)' || echo '13')"
 echo "========================================"
 
 export DISPLAY=:0
@@ -117,15 +119,28 @@ else
         exec bash" &
     sleep 2
 
-    # 窗口 4: 唤醒词 + VLM
-    gnome-terminal -- bash -c "
-        source /opt/ros/melodic/setup.bash
-        source ${WS_PATH}/devel/setup.bash
-        sleep 10
-        roslaunch robot_slam GameStart.launch &
-        sleep 2
-        roslaunch abot_vlm vlm_node.launch &
-        exec bash" &
+    # 窗口 4: ASR 语音识别 (仅模式1) + VLM + TTS
+    if [ "${SIM_MODE}" = "false" ]; then
+        gnome-terminal -- bash -c "
+            source /opt/ros/melodic/setup.bash
+            source ${WS_PATH}/devel/setup.bash
+            sleep 10
+            rosrun robot_slam doubao_asr.py &
+            sleep 2
+            roslaunch abot_vlm vlm_node.launch &
+            sleep 2
+            rosrun robot_slam doubao_tts.py &
+            exec bash" &
+    else
+        gnome-terminal -- bash -c "
+            source /opt/ros/melodic/setup.bash
+            source ${WS_PATH}/devel/setup.bash
+            sleep 10
+            roslaunch abot_vlm vlm_node.launch &
+            sleep 2
+            rosrun robot_slam doubao_tts.py &
+            exec bash" &
+    fi
     sleep 2
 
     # 窗口 5: 任务状态机 + 安全监控
@@ -151,9 +166,9 @@ else
     echo "窗1: roscore"
     echo "窗2: 底盘驱动 (abot_driver + IMU + LiDAR + EKF)"
     echo "窗3: 导航栈 (map_server + AMCL + move_base)"
-    echo "窗4: 唤醒词 + VLM 视觉"
+    echo "窗4: $([ "${SIM_MODE}" = "false" ] && echo '豆包 ASR 语音识别 + ')/VLM 视觉 + TTS 语音"
     echo "窗5: 任务状态机 + 安全监控"
     echo "窗6: RViz 可视化"
     echo ""
-    echo "等待唤醒词或发布 sim_wakeup..."
+    [ "${SIM_MODE}" = "false" ] && echo "说出'开始比赛'启动..." || echo "模式3: 5s 后自动开始"
 fi
