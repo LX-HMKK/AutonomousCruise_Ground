@@ -242,6 +242,28 @@ class SimRobot(object):
         t.transform.rotation = Quaternion(*q)
         self.tf_br.sendTransformMessage(t)
 
+        # base_footprint → base_link (代替 robot_state_publisher, 消除外部 TF 依赖)
+        t_bl = TransformStamped()
+        t_bl.header.stamp = now
+        t_bl.header.frame_id = 'base_footprint'
+        t_bl.child_frame_id = 'base_link'
+        t_bl.transform.translation.x = 0.0
+        t_bl.transform.translation.y = 0.0
+        t_bl.transform.translation.z = 0.0
+        t_bl.transform.rotation = Quaternion(0, 0, 0, 1)
+        self.tf_br.sendTransformMessage(t_bl)
+
+        # base_link → laser_link (costmap 观测需要)
+        t_laser = TransformStamped()
+        t_laser.header.stamp = now
+        t_laser.header.frame_id = 'base_link'
+        t_laser.child_frame_id = 'laser_link'
+        t_laser.transform.translation.x = 0.0
+        t_laser.transform.translation.y = 0.0
+        t_laser.transform.translation.z = 0.0
+        t_laser.transform.rotation = Quaternion(0, 0, 0, 1)
+        self.tf_br.sendTransformMessage(t_laser)
+
     def run(self):
         rate = rospy.Rate(20)
         tick = 0
