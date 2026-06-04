@@ -44,9 +44,10 @@ task_region:
 # 内部 8×8 区域随机挡板 (仿真用于测试避障)
 # 格子编号 10-72 (不含最外圈 1-9, 73-81 和中圈 10-17, 26, 35, 44, 53, 62, 71)
 obstacles:
-  - cell: 19
-  - cell: 28
+  - cell: 20
+  - cell: 34
   - cell: 58
+  - cell: 67
 
 obstacles_config:
   board_size_m: [0.40, 0.30]
