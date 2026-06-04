@@ -20,7 +20,7 @@ START=$(date +%s)
 
 # 1. 清理
 echo "[1/4] 清理旧进程..."
-killall -9 rosmaster rosout roscore roslaunch rviz 2>/dev/null || true
+killall -9 rosmaster rosout roscore roslaunch rviz move_base amcl map_server sim_robot robot_state_publisher mock_vlm mock_tts mission_state_machine safety_monitor cartographer_node 2>/dev/null || true
 sleep 2
 
 # 2. 同步 (Windows 源码 → WSL 工作空间) — 递归覆盖，新增目录/文件自动包含
