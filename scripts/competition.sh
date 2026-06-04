@@ -20,7 +20,7 @@
 
 WS_PATH="${HOME}/abot_ws"
 MAP_NAME="${1:-game}"
-SIM_MODE="${2:-true}"
+SIM_MODE="${2:-false}"  # 实车默认等待 Snowboy 唤醒; WSL 测试时传 true
 
 echo "========================================"
 echo "  ABOT 地面巡航 — 完整比赛模式"

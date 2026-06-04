@@ -1,5 +1,6 @@
 <launch>
-    <node name="top_view_shot_node" pkg="abot_vlm" type="vlm_node.py" output="screen">
+    <!-- 实际脚本为 doubao.py (火山引擎 Ark SDK); doubao_openAI.py 为备选 (OpenAI SDK) -->
+    <node name="top_view_shot_node" pkg="abot_vlm" type="doubao.py" output="screen">
         <param name="im_flag" type="int" value="255" />
         <!--节点特定的参数，仅在该节点内有效。-->
     </node>
