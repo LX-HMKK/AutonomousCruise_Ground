@@ -1,32 +1,34 @@
 # config/mission.yaml
-# 比赛任务全局参数：超时、重试、语音要求
+# 比赛任务全局参数：超时、重试、语音、等待时长
 
 mission:
-  map_name: competition_field
-  max_time_s: 180
-  required_task_image_count: 4
-  require_start_voice: true
-  require_finish_voice: true
-  stop_before_voice: true
-  voice_static_hold_s: 0.5
-  localization_required: true
-  retry_on_low_confidence: true
+  map_name: competition_field      # 地图名 (competition_field / game / my_lab)
+  max_time_s: 180                  # 比赛总时长上限
+  required_task_image_count: 4     # 需要完成的任务图像数量
+  require_start_voice: true        # 是否需要开始语音
+  require_finish_voice: true       # 是否需要结束语音
+  stop_before_voice: true          # 语音播报前是否停车
+  voice_static_hold_s: 0.5         # 播报前停稳时间
+  localization_required: true      # 是否需要定位
+  retry_on_low_confidence: true    # 低置信度是否重试
 
+# ---- 超时配置 ----
 timeouts:
-  no_motion_after_start_s: 20
-  no_state_change_s: 40          # 导航+识别流程可能较长，不要太短
-  perception_retry_limit: 3
-  navigation_retry_limit: 2
-  navigation_goal_timeout_s: 60
-  nav_stuck_timeout_s: 10.0
+  no_motion_after_start_s: 20      # 启动后无运动超时 (safety_monitor 用)
+  no_state_change_s: 40            # 单状态最长停留时间 (导航+识别可能较长)
+  perception_retry_limit: 3        # 识别失败最大重试次数
+  navigation_retry_limit: 2        # 导航失败最大重试次数
+  navigation_goal_timeout_s: 60    # 单次导航超时
+  nav_stuck_timeout_s: 10.0        # 导航卡死检测 (位移<2cm且yaw变化<0.05rad)
 
-# 各类等待时长 (可调)
+# ---- 等待时长 (全部可调) ----
 waits:
-  arrival_stabilize_s: 1.0       # 到达后位姿稳定等待
-  vision_trigger_delay_s: 0.5    # VLM触发前短暂停稳
-  nav_poll_interval_s: 1.0       # 导航轮询间隔
-  speak_hold_s: 0.5              # 播报前停稳时间
+  arrival_stabilize_s: 1.0         # 导航到达后位姿稳定等待
+  vision_trigger_delay_s: 0.5      # 到达视觉点后停车等稳再触发VLM
+  nav_poll_interval_s: 1.0         # 导航轮询间隔
+  speak_hold_s: 0.5                # 播报前停稳时间
 
+# ---- 识别置信度 ----
 confidence:
-  min_confidence: 0.6
+  min_confidence: 0.6              # 最低置信度, 低于此值触发重试
   description: "低于此置信度触发重识别或人工介入"

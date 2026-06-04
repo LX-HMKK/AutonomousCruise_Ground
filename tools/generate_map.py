@@ -79,10 +79,17 @@ def generate_map(config_path, output_name):
     # ---- 障碍物 (由 sim_robot 动态注入激光数据, 不写入 PGM) ----
     obstacles = cfg.get('obstacles') or []
     if obstacles:
-        print('[i] %d obstacle(s) in config (injected via sim_robot LiDAR, not PGM)' % len(obstacles))
+        print('[i] %d obstacle(s) on grid lines (injected via sim_robot LiDAR)' % len(obstacles))
         for obs in obstacles:
-            cx, cy = cell_center(obs['cell'], grid_cols, cell_sz, field_w, field_h)
-            print('    cell %d: (%.3f, %.3f)' % (obs['cell'], cx, cy))
+            cell = obs['cell']
+            cx, cy = cell_center(cell, grid_cols, cell_sz, field_w, field_h)
+            edge = obs.get('edge', 'center')
+            off = cell_sz / 2.0
+            if edge == 'N': cy += off
+            elif edge == 'S': cy -= off
+            elif edge == 'E': cx += off
+            elif edge == 'W': cx -= off
+            print('    cell %d edge %s: (%.3f, %.3f)' % (cell, edge, cx, cy))
 
     # ---- 保存 ----
     maps_dir = os.path.join(REPO, 'src', 'robot_slam', 'maps')
