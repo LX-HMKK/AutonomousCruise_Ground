@@ -20,13 +20,17 @@ echo "[1/4] 清理旧进程..."
 killall -9 rosmaster rosout roscore roslaunch rviz 2>/dev/null || true
 sleep 2
 
-# 2. 同步
+# 2. 同步 (Windows 源码 → WSL 工作空间)
 echo "[2/4] 同步源码..."
-mkdir -p "$WS"/src/mission_manager/launch "$WS"/config
+mkdir -p "$WS"/src/mission_manager/launch "$WS"/src/mission_manager/scripts \
+         "$WS"/src/common/scripts "$WS"/config "$WS"/src/robot_slam/maps
+
 cp "$SRC"/src/mission_manager/scripts/*.py "$WS"/src/mission_manager/scripts/
 cp "$SRC"/src/mission_manager/launch/*.launch "$WS"/src/mission_manager/launch/
+cp "$SRC"/src/common/scripts/*.py "$WS"/src/common/scripts/
 cp "$SRC"/config/*.yaml "$WS"/config/
 cp "$SRC"/src/robot_slam/maps/"$MAP_NAME".* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
+echo "  地图: $MAP_NAME  ($(head -1 "$WS"/src/robot_slam/maps/"$MAP_NAME".yaml 2>/dev/null || echo 'MISSING!'))"
 
 # 3. 启动
 echo "[3/4] 启动仿真 (map_name=$MAP_NAME)..."
