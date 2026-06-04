@@ -44,10 +44,10 @@ task_region:
 # 内部 8×8 区域随机挡板 (仿真用于测试避障)
 # cell: 格子编号  yaw_deg: 挡板朝向(角度), 0=水平 90=竖直 45=斜向
 obstacles:
-  - { cell: 23, yaw_deg: 60 }
-  - { cell: 39, yaw_deg: 0  }
+  - { cell: 23, yaw_deg: 90 }
+  - { cell: 40, yaw_deg: 0  }
   - { cell: 43, yaw_deg: 90 }
-  - { cell: 59, yaw_deg: 30 }
+  - { cell: 59, yaw_deg: 0 }
 
 obstacles_config:
   board_size_m: [0.01, 0.4]

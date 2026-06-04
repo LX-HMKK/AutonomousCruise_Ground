@@ -206,9 +206,9 @@ class SimRobot(object):
             yaw = math.atan2(by - ay, bx - ax)
             q = tf.transformations.quaternion_from_euler(0, 0, yaw)
             m.pose.orientation = Quaternion(*q)
-            # 挡板尺寸: 宽40cm × 厚2cm × 高30cm
+            # 挡板尺寸: 宽40cm × 厚1cm × 高30cm
             m.scale.x = 0.40
-            m.scale.y = 0.02
+            m.scale.y = 0.01
             m.scale.z = 0.30
             m.color.r = 1.0
             m.color.g = 0.3
