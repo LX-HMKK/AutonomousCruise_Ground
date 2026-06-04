@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """豆包 TTS 节点：订阅 /voiceWords，调用豆包语音合成 HTTP API，mplayer 播放。
 
-认证: Bearer Token (分号分隔), 资源 ID: volc.tts_async.default
-输出 /tts_done 通知状态机播报完成。
+认证: Bearer; token (分号分隔)。输出 /tts_done 通知播报完成。
 """
 
 import rospy
@@ -14,10 +13,9 @@ import requests
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN
+from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_RESOURCE_ID
 
 # ---- TTS 配置 ----
-TTS_RESOURCE_ID = "volc.tts_async.default"  # 豆包语音合成 (长文本)
 TTS_API_URL = "https://openspeech.bytedance.com/api/v1/tts_async/submit"
 TTS_QUERY_URL = "https://openspeech.bytedance.com/api/v1/tts_async/query"
 
@@ -30,7 +28,8 @@ class DoubaoTTS(object):
         rospy.Subscriber('/voiceWords', String, self._on_voice)
         self.appid = SPEECH_APPID
         self.token = SPEECH_TOKEN
-        rospy.loginfo('[DoubaoTTS] Ready. resource=%s', TTS_RESOURCE_ID)
+        self.resource_id = SPEECH_RESOURCE_ID
+        rospy.loginfo('[DoubaoTTS] Ready. resource=%s', self.resource_id)
 
     def _on_voice(self, msg):
         text = msg.data.strip()
@@ -54,7 +53,7 @@ class DoubaoTTS(object):
         import uuid as _uuid
         headers = {
             'Authorization': 'Bearer; ' + self.token,
-            'Resource-Id': TTS_RESOURCE_ID,
+            'Resource-Id': self.resource_id,
             'Content-Type': 'application/json',
         }
         body = {

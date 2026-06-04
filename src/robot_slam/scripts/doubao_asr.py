@@ -18,10 +18,9 @@ import requests
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN
+from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_RESOURCE_ID
 
 # ---- ASR 配置 ----
-ASR_RESOURCE_ID = "volc.seedasr.auc"   # 豆包语音识别模型 2.0
 ASR_API_URL = "https://openspeech.bytedance.com/api/v1/asr"
 
 # ---- 录音参数 ----
@@ -58,8 +57,9 @@ class DoubaoASR(object):
         self.start_pub = rospy.Publisher('/start', String, queue_size=10)
         self.appid = SPEECH_APPID
         self.token = SPEECH_TOKEN
-        rospy.loginfo('[DoubaoASR] Ready. Resource=%s  Waiting for "开始比赛"...',
-                      ASR_RESOURCE_ID)
+        self.resource_id = SPEECH_RESOURCE_ID
+        rospy.loginfo('[DoubaoASR] Ready. resource=%s appid=%s',
+                      self.resource_id, self.appid)
 
     def run(self):
         rate = rospy.Rate(0.5)
@@ -95,7 +95,7 @@ class DoubaoASR(object):
                 audio_data = f.read()
             headers = {
                 'Authorization': 'Bearer; ' + self.token,
-                'Resource-Id': ASR_RESOURCE_ID,
+                'Resource-Id': self.resource_id,
                 'Content-Type': 'application/json',
             }
             import base64, uuid as _uuid

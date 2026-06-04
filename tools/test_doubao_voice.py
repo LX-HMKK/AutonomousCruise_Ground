@@ -1,132 +1,96 @@
 #!/usr/bin/env python3
 """WSL 环境下测试豆包 ASR/TTS API 连通性。"""
 
-import os
-import sys
-import requests
-import json
-import wave
-import struct
-import math
+import os, sys, requests, json, uuid, base64, time, wave, struct, math
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import DOUBAO_KEY
+from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN
 
-API_KEY = DOUBAO_KEY
-AUTH_HEADER = 'Bearer; ' + API_KEY  # 火山引擎要求分号
-
-# ---- TTS 测试 ----
-TTS_RESOURCE_ID = "volc.tts_async.default"
-TTS_SUBMIT_URL = "https://openspeech.bytedance.com/api/v1/tts_async/submit"
-TTS_QUERY_URL = "https://openspeech.bytedance.com/api/v1/tts_async/query"
-TTS_APPID = "594a7b46"
-
-# ---- ASR 测试 ----
-ASR_RESOURCE_ID = "volc.seedasr.auc"
-ASR_URL = "https://openspeech.bytedance.com/api/v1/asr"
+AUTH = 'Bearer; ' + SPEECH_TOKEN
+RID = '7654152222'  # 用户 Resource ID
 
 
 def test_tts():
-    """测试豆包 TTS API。"""
-    print("\n=== 测试 TTS 语音合成 ===")
-    headers = {
-        'Authorization': AUTH_HEADER,
-        'Resource-Id': TTS_RESOURCE_ID,
-        'Content-Type': 'application/json',
-    }
+    """测试豆包 TTS API (语音合成大模型-字符版)。"""
+    print("\n=== TTS 语音合成 ===")
+    h = {'Authorization': AUTH, 'Resource-Id': RID, 'Content-Type': 'application/json'}
     body = {
-        'appid': TTS_APPID,
+        'appid': SPEECH_APPID,
+        'reqid': str(uuid.uuid4()),
         'text': '比赛开始',
-        'speaker': 'zh_female_qingxin',
-        'audio_params': {'format': 'mp3', 'sample_rate': 16000},
+        'format': 'mp3',
+        'voice_type': 'BV701_streaming',
+        'sample_rate': 24000,
     }
-    print(f"  URL: {TTS_SUBMIT_URL}")
-    print(f"  Auth: Bearer; {API_KEY[:20]}...")
-    print(f"  Resource-Id: {TTS_RESOURCE_ID}")
+    print(f"  Auth: {AUTH[:30]}...")
     print(f"  Text: {body['text']}")
-
-    try:
-        resp = requests.post(TTS_SUBMIT_URL, headers=headers, json=body, timeout=10)
-        print(f"  Status: {resp.status_code}")
-        print(f"  Body: {resp.text[:300]}")
-        if resp.status_code == 200:
-            data = resp.json()
-            task_id = data.get('task_id', '')
-            print(f"  task_id: {task_id}")
-            if task_id:
-                import time
-                for i in range(30):
-                    time.sleep(0.3)
-                    qresp = requests.get(TTS_QUERY_URL, headers=headers,
-                                         params={'appid': TTS_APPID, 'task_id': task_id}, timeout=5)
-                    if qresp.status_code == 200:
-                        qdata = qresp.json()
-                        status = qdata.get('status', '')
-                        print(f"  Poll {i}: status={status}")
-                        if status == 'success':
-                            audio_url = qdata.get('audio_url', '')
-                            print(f"  audio_url: {audio_url[:80]}...")
-                            print("  ✅ TTS 测试通过!")
-                            return True
-                    if i > 5:
-                        break
-        else:
-            print(f"  ❌ TTS HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"  ❌ TTS Exception: {e}")
+    r = requests.post('https://openspeech.bytedance.com/api/v1/tts_async/submit', headers=h, json=body, timeout=10)
+    print(f"  Status: {r.status_code}")
+    print(f"  Body: {r.text[:300]}")
+    if r.status_code != 200:
+        return False
+    data = r.json()
+    tid = data.get('task_id', '')
+    if not tid:
+        return False
+    print(f"  task_id: {tid}")
+    for i in range(30):
+        time.sleep(0.3)
+        q = requests.get('https://openspeech.bytedance.com/api/v1/tts_async/query',
+                         headers=h, params={'appid': SPEECH_APPID, 'task_id': tid}, timeout=5)
+        if q.status_code == 200:
+            qd = q.json()
+            s = qd.get('status', '')
+            print(f"  poll {i}: {s}")
+            if s == 'success':
+                url = qd.get('audio_url', '')
+                print(f"  audio_url: {url[:80]}")
+                print("  TTS PASS")
+                return True
+    print("  TTS TIMEOUT")
     return False
 
 
 def test_asr():
-    """测试豆包 ASR API (用简单正弦波模拟语音)。"""
-    print("\n=== 测试 ASR 语音识别 ===")
+    """测试豆包 ASR API (录音文件识别大模型-标准版)。"""
+    print("\n=== ASR 语音识别 ===")
+    wav = '/tmp/test_speech.wav'
+    sr = 16000
+    with wave.open(wav, 'wb') as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sr)
+        for i in range(sr * 3):
+            v = int(16000 * math.sin(2 * math.pi * 440 * i / sr))
+            wf.writeframes(struct.pack('<h', v))
+    with open(wav, 'rb') as f:
+        audio = f.read()
+    os.unlink(wav)
 
-    # 生成一个简单的 WAV 文件 (1kHz 正弦波, 3秒, 模拟语音)
-    wav_path = '/tmp/test_asr.wav'
-    sample_rate = 16000
-    duration = 3
-    num_samples = sample_rate * duration
-    with wave.open(wav_path, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        for i in range(num_samples):
-            value = int(16000 * math.sin(2 * math.pi * 1000 * i / sample_rate))
-            wf.writeframes(struct.pack('<h', value))
-
-    print(f"  WAV: {wav_path} ({duration}s, {sample_rate}Hz)")
-
-    headers = {
-        'Authorization': AUTH_HEADER,
-        'Resource-Id': ASR_RESOURCE_ID,
-        'Content-Type': 'audio/wav; codec=pcm; rate=%d' % sample_rate,
-    }
-    print(f"  URL: {ASR_URL}")
-    print(f"  Resource-Id: {ASR_RESOURCE_ID}")
-
-    try:
-        with open(wav_path, 'rb') as f:
-            audio_data = f.read()
-        resp = requests.post(ASR_URL, headers=headers, data=audio_data, timeout=10)
-        print(f"  Status: {resp.status_code}")
-        print(f"  Body: {resp.text[:300]}")
-        if resp.status_code == 200:
-            print("  ✅ ASR API 可达 (但正弦波无有效文字属于正常)")
+    # 试多种 ASR body 格式
+    variants = [
+        {'appid': SPEECH_APPID},
+        {'app_id': SPEECH_APPID},
+        {},
+    ]
+    for v in variants:
+        h = {'Authorization': AUTH, 'Resource-Id': RID, 'Content-Type': 'application/json'}
+        body = {
+            'reqid': str(uuid.uuid4()),
+            'audio': base64.b64encode(audio).decode('utf-8'),
+            'audio_format': 'wav',
+            'sample_rate': sr,
+        }
+        body.update(v)
+        r = requests.post('https://openspeech.bytedance.com/api/v1/asr', headers=h, json=body, timeout=10)
+        print(f"  ASR with {v}: {r.status_code} {r.text[:200]}")
+        if r.status_code == 200:
+            print("  ASR PASS")
             return True
-        else:
-            print(f"  ❌ ASR HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"  ❌ ASR Exception: {e}")
-    finally:
-        os.unlink(wav_path)
     return False
 
 
 if __name__ == '__main__':
-    print("豆包语音 API 连通性测试")
-    print("API Key:", API_KEY[:20] + "..." if API_KEY else "NOT SET")
-
+    print("豆包语音 API 测试")
+    print(f"APPID: {SPEECH_APPID}  TOKEN: {SPEECH_TOKEN[:20]}...")
     tts_ok = test_tts()
     asr_ok = test_asr()
-
-    print(f"\n结果: TTS={'✅' if tts_ok else '❌'}  ASR={'✅' if asr_ok else '❌'}")
+    print(f"\n结果: TTS={'PASS' if tts_ok else 'FAIL'}  ASR={'PASS' if asr_ok else 'FAIL'}")
