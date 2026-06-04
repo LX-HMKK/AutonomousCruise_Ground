@@ -9,6 +9,10 @@
   <!-- 2. URDF 机器人模型 (RViz 显示需要) -->
   <param name="robot_description" textfile="$(find abot_model)/urdf/abot_model.urdf"/>
   <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"/>
+  <!-- joint_state_publisher 必须存在, 否则 robot_state_publisher 的固定关节 TF 会过期消失 -->
+  <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher">
+    <param name="use_gui" value="false"/>
+  </node>
 
   <!-- 3. 仿真机器人（odom + scan + TF）起点设为比赛起点 cell 1 = (-1.6, 1.6) -->
   <node pkg="mission_manager" type="sim_robot.py" name="sim_robot" output="screen">

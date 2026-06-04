@@ -14,11 +14,18 @@ mission:
 
 timeouts:
   no_motion_after_start_s: 20
-  no_state_change_s: 20
+  no_state_change_s: 40          # 导航+识别流程可能较长，不要太短
   perception_retry_limit: 3
   navigation_retry_limit: 2
   navigation_goal_timeout_s: 60
   nav_stuck_timeout_s: 10.0
+
+# 各类等待时长 (可调)
+waits:
+  arrival_stabilize_s: 1.0       # 到达后位姿稳定等待
+  vision_trigger_delay_s: 0.5    # VLM触发前短暂停稳
+  nav_poll_interval_s: 1.0       # 导航轮询间隔
+  speak_hold_s: 0.5              # 播报前停稳时间
 
 confidence:
   min_confidence: 0.6
