@@ -79,18 +79,11 @@ def generate_map(config_path, output_name):
     # ---- 障碍物 (由 sim_robot 动态注入激光数据, 不写入 PGM) ----
     obstacles = cfg.get('obstacles') or []
     if obstacles:
-        board_len, board_thickness = board_dimensions(cfg)
-        inward = max(cell_sz / 2.0 - board_thickness / 2.0, 0.0)
-        print('[i] %d obstacle(s) inside configured cells (injected via sim_robot LiDAR)' % len(obstacles))
+        print('[i] %d obstacle(s) on internal grid edges (injected via sim_robot LiDAR)' % len(obstacles))
         for obs in obstacles:
-            cell = obs['cell']
-            cx, cy = cell_center(cell, grid_cols, cell_sz, field_w, field_h)
-            edge = str(obs.get('edge', 'center')).upper()
-            if edge == 'N': cy += inward
-            elif edge == 'S': cy -= inward
-            elif edge == 'E': cx += inward
-            elif edge == 'W': cx -= inward
-            print('    cell %d edge %s: (%.3f, %.3f)' % (cell, edge, cx, cy))
+            cx, cy, yaw = obstacle_pose(obs, grid_rows, grid_cols, cell_sz, field_w, field_h)
+            print('    cell %d edge %s: center=(%.3f, %.3f), yaw=%.1fdeg' %
+                  (obs['cell'], str(obs.get('edge')).upper(), cx, cy, math.degrees(yaw)))
 
     # ---- 保存 ----
     maps_dir = os.path.join(REPO, 'src', 'robot_slam', 'maps')
@@ -134,7 +127,9 @@ def generate_map(config_path, output_name):
     if obstacles:
         print('障碍物:')
         for obs in obstacles:
-            print('  cell %d' % obs['cell'])
+            cx, cy, yaw = obstacle_pose(obs, grid_rows, grid_cols, cell_sz, field_w, field_h)
+            print('  cell %d edge %s: (%.3f, %.3f), yaw=%.1fdeg' %
+                  (obs['cell'], str(obs.get('edge')).upper(), cx, cy, math.degrees(yaw)))
 
 
 def cell_center(cell_number, cols, cell_sz, field_w, field_h):
@@ -156,6 +151,40 @@ def board_dimensions(cfg):
     thickness = min(float(size[0]), float(size[1]))
     length = max(float(size[0]), float(size[1]))
     return length, thickness
+
+
+def obstacle_pose(obs, rows, cols, cell_sz, field_w, field_h):
+    """把 {cell, edge} 转成内部网格边上的挡板中心和朝向。"""
+    cell = obs['cell']
+    if cell < 1 or cell > rows * cols:
+        raise ValueError('obstacle cell %s is outside 1..%d' % (cell, rows * cols))
+
+    n = cell - 1
+    row = n // cols
+    col = n % cols
+    edge = str(obs.get('edge', '')).upper()
+    if edge not in ('N', 'S', 'E', 'W'):
+        raise ValueError('obstacle cell %s must set edge=N/S/E/W' % cell)
+    if ((edge == 'N' and row == 0) or
+            (edge == 'S' and row == rows - 1) or
+            (edge == 'W' and col == 0) or
+            (edge == 'E' and col == cols - 1)):
+        raise ValueError('obstacle cell %s edge %s is outer boundary' % (cell, edge))
+
+    cx, cy = cell_center(cell, cols, cell_sz, field_w, field_h)
+    if edge == 'N':
+        cy += cell_sz / 2.0
+        yaw = 0.0
+    elif edge == 'S':
+        cy -= cell_sz / 2.0
+        yaw = 0.0
+    elif edge == 'E':
+        cx += cell_sz / 2.0
+        yaw = math.pi / 2.0
+    else:
+        cx -= cell_sz / 2.0
+        yaw = math.pi / 2.0
+    return cx, cy, yaw
 
 
 if __name__ == '__main__':

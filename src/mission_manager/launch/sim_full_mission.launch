@@ -13,7 +13,10 @@
   </node>
 
   <!-- 3. Mock TTS (仿真语音播报) -->
-  <node pkg="mission_manager" type="mock_tts.py" name="mock_tts" output="screen"/>
+  <node pkg="mission_manager" type="mock_tts.py" name="mock_tts" output="screen">
+    <param name="speech_rate" value="8.0"/>
+    <param name="max_duration" value="3.0"/>
+  </node>
 
   <!-- 4. 任务状态机 (仿真模式) -->
   <node pkg="mission_manager" type="mission_state_machine.py" name="mission_state_machine" output="screen">

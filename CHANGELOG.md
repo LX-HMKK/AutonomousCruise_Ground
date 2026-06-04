@@ -23,9 +23,15 @@
 - **mark_map_gui**：新增两点点击标定车头朝向（yaw），箭头渲染
 
 #### Fixed
+- `sim_robot.py` 修正射线-线段求交 `u` 参数符号，避免 LiDAR 将挡板投影到线段延长线上造成假障碍
+- `competition_field.yaml` 默认挡板改为内部 8×8 方框边缘；`sim_robot.py`/`generate_map.py` 对外边界 edge 和缺失 edge 直接报错，避免挡板跑到场地外
+- `mission_state_machine.py` 到达任务点后的稳定等待、导航轮询间隔、footprint 修正次数改为读取 `mission.yaml`，避免 move_base 成功后继续长时间反复等待
+- `mission_state_machine.py` 任务点到达判定新增 footprint 优先放行与任务中心容差降级放行，视觉点/终点新增位姿容差放行，避免 move_base 末端旋转恢复拖满 30s
+- `dwa_local_planner_params.yaml` 收紧 `xy_goal_tolerance` 并降低 `min_vel_trans`，避免 5cm 容差提前宣布到达导致 footprint 反复修正
+- `sim_full_mission.launch` 调快 MockTTS 播报参数，避免仿真链路被模拟语音时长吃掉终点导航时间
 - `dwa_local_planner_params.yaml` 为全向底盘启用 `vy_samples` 横移采样，避免挡板附近只能前后/旋转导致卡死
 - RViz 默认关闭 raw local costmap 覆盖层，避免 3m rolling window 黑块遮挡全局地图和围栏
-- `sim_robot.py` 挡板 marker/LiDAR 线段中心不再压在格线，`edge` 贴边时向配置 cell 内缩进半个挡板厚度
+- `sim_robot.py` 挡板 marker/LiDAR 线段中心按 `cell+edge` 精确落在内部格线边上
 - `competition_field.yaml` 网格坐标说明修正，消除文档公式相对实际代码偏半格的问题
 - `sim_full_test.sh` 补充同步 `robot_slam/params/carto/*.yaml` 与 RViz 配置，避免 Windows 侧导航参数修改未生效
 - `sim_full_test.sh` 在 source ROS 环境时临时关闭 `nounset`，避免 `ROS_DISTRO: unbound variable` 导致同步前退出

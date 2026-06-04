@@ -18,15 +18,24 @@ timeouts:
   no_state_change_s: 40            # 单状态最长停留时间 (导航+识别可能较长)
   perception_retry_limit: 3        # 识别失败最大重试次数
   navigation_retry_limit: 2        # 导航失败最大重试次数
+  footprint_retry_limit: 2         # 到达后 footprint 修正次数，避免厘米级误差反复等待
   navigation_goal_timeout_s: 30    # 单次导航超时
   nav_stuck_timeout_s: 10.0        # 导航卡死检测 (位移<2cm且yaw变化<0.05rad)
 
 # ---- 等待时长 (全部可调) ----
 waits:
-  arrival_stabilize_s: 1.0         # 导航到达后位姿稳定等待
+  arrival_stabilize_s: 0.2         # 导航到达后位姿稳定等待
   vision_trigger_delay_s: 0.5      # 到达视觉点后停车等稳再触发VLM
-  nav_poll_interval_s: 1.0         # 导航轮询间隔
+  nav_poll_interval_s: 0.5         # 导航轮询间隔
   speak_hold_s: 0.5                # 播报前停稳时间
+
+# ---- 导航到达容差 ----
+navigation:
+  task_center_tolerance_m: 0.04    # 任务点中心容差；仿真中不为 yaw=0 末端旋转拖满超时
+  vision_xy_tolerance_m: 0.04      # 视觉点位置容差，避免 move_base 末端旋转恢复拖满超时
+  vision_yaw_tolerance_rad: 0.12   # 视觉点车头朝向容差，约 6.9°
+  finish_xy_tolerance_m: 0.05      # 终点位置容差
+  finish_yaw_tolerance_rad: 0.20   # 终点朝向容差，终点不要求精准朝向
 
 # ---- 识别置信度 ----
 confidence:

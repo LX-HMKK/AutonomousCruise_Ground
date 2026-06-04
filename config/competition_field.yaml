@@ -41,19 +41,19 @@ task_region:
   size_m: [0.38, 0.32]
   description: "任务点区域 38cm x 32cm，在对应黄色格子中居中"
 
-# 指定格子内的挡板 (仿真避障测试, 避开任务区 31-33/40-42/49-51)
+# 内圈 8×8 方框边缘上的挡板 (仿真避障测试, 避开外边界)
 # cell: 参照格子  edge: 格子的哪条边 (N=北 S=南 E=东 W=西)
-# 挡板贴近该边但中心保持在 cell 内部, 朝向自动对齐边 (yaw_deg 可覆盖)
+# edge 必须是内部边，不能放在场地外边界；朝向自动对齐边 (yaw_deg 可覆盖)
 obstacles:
-  - { cell: 19, edge: S }   # 水平挡板
+  - { cell: 20, edge: S }   # 水平挡板
   - { cell: 22, edge: E }   # 竖直挡板
-  - { cell: 46, edge: W }   # 竖直挡板
-  - { cell: 58, edge: N }   # 水平挡板
-  - { cell: 60, yaw_deg: 0 }
+  - { cell: 46, edge: E }   # 竖直挡板
+  - { cell: 53, edge: N }   # 水平挡板
+  - { cell: 60, edge: S }   # 水平挡板
 
 obstacles_config:
   board_size_m: [0.01, 0.4]
-  description: "仿真挡板厚 1cm、长 40cm；edge 表示贴近指定格子的哪条边"
+  description: "仿真挡板厚 1cm、长 40cm；edge 表示内圈方框的哪条边"
 
 task_images:
   count: 4

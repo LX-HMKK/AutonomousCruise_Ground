@@ -156,7 +156,7 @@ roslaunch mission_manager sim_full_mission.launch map_name:=competition_field
 | 文件 | 关键配置 |
 |---|---|
 | `competition_field.yaml` | 场地尺寸、vision_positions(视觉点)、vision_to_task(视觉→任务区映射,含yaw)、obstacles(cell+edge格式) |
-| `mission.yaml` | map_name(地图切换)、总时长、超时、重试、waits(到达稳定/VLM触发/导航轮询) |
+| `mission.yaml` | map_name(地图切换)、总时长、超时、重试、waits(到达稳定/VLM触发/导航轮询)、navigation(视觉点/终点容差) |
 | `robot.yaml` | 尺寸、footprint |
 | `costmap_common_params.yaml` | inflation_radius(膨胀层)、footprint |
 | `dwa_local_planner_params.yaml` | xy_goal_tolerance(到达容差)、occdist_scale(避障权重)、速度/加速度 |
@@ -165,11 +165,11 @@ roslaunch mission_manager sim_full_mission.launch map_name:=competition_field
 ### 障碍物配置
 
 ```yaml
-# competition_field.yaml — cell+edge 格式, 挡板贴近指定边但保持在该 cell 内
+# competition_field.yaml — cell+edge 格式, 挡板放在 9×9 网格的内部边上
 obstacles:
-  - { cell: 19, edge: S }   # 19号南边, 水平挡板
+  - { cell: 20, edge: S }   # 20号南边, 水平挡板
   - { cell: 22, edge: E }   # 22号东边, 竖直挡板
-  # edge: N/S/E/W, 自动对齐边方向, marker 中心不会偏出 cell, yaw_deg 可覆盖
+  # edge: N/S/E/W, 不能指向场地外边界；yaw_deg 可覆盖自动朝向
 ```
 
 ## 开发进度

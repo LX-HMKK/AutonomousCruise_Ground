@@ -66,6 +66,39 @@ def _board_dimensions(cfg):
     return length, thickness
 
 
+def _obstacle_pose(obs, rows, cols, cell_sz):
+    """把 {cell, edge} 转成内部网格边上的挡板中心和朝向。"""
+    cell = obs['cell']
+    if cell < 1 or cell > rows * cols:
+        raise ValueError('obstacle cell %s is outside 1..%d' % (cell, rows * cols))
+    n = cell - 1
+    row = n // cols
+    col = n % cols
+    edge = str(obs.get('edge', '')).upper()
+    if edge not in ('N', 'S', 'E', 'W'):
+        raise ValueError('obstacle cell %s must set edge=N/S/E/W' % cell)
+    if ((edge == 'N' and row == 0) or
+            (edge == 'S' and row == rows - 1) or
+            (edge == 'W' and col == 0) or
+            (edge == 'E' and col == cols - 1)):
+        raise ValueError('obstacle cell %s edge %s is outer boundary' % (cell, edge))
+
+    cx, cy = _cell_to_xy(cell, rows, cols, cell_sz)
+    if edge == 'N':
+        cy += cell_sz / 2.0
+        yaw = 0.0
+    elif edge == 'S':
+        cy -= cell_sz / 2.0
+        yaw = 0.0
+    elif edge == 'E':
+        cx += cell_sz / 2.0
+        yaw = math.pi / 2.0
+    else:
+        cx -= cell_sz / 2.0
+        yaw = math.pi / 2.0
+    return cx, cy, yaw
+
+
 class SimRobot(object):
     """仿真机器人：响应 /cmd_vel 更新位姿，发布 odom + laser(含障碍物) + TF。"""
 
@@ -78,7 +111,7 @@ class SimRobot(object):
         self.y = init_y
         self.yaw = init_yaw
 
-        # 加载障碍物 — 放在配置 cell 内靠指定边的位置，建模为线段
+        # 加载障碍物 — 放在内圈网格边上，建模为线段
         self.obstacle_segments = []
         try:
             config_path = _find_config('competition_field.yaml')
@@ -90,26 +123,8 @@ class SimRobot(object):
                 cell_sz = field['cell_size_m']
                 board_len, board_thickness = _board_dimensions(cfg)
                 half = board_len / 2.0
-                inward = max(cell_sz / 2.0 - board_thickness / 2.0, 0.0)
                 for obs in (cfg.get('obstacles') or []):
-                    cell = obs['cell']
-                    cx, cy = _cell_to_xy(cell, rows, cols, cell_sz, field['size_m'][0])
-                    edge = str(obs.get('edge', '')).upper()
-                    # 贴近指定边，但 marker 中心仍保持在 YAML 指定 cell 内部。
-                    if edge == 'N':
-                        cy += inward
-                        def_yaw = 0.0
-                    elif edge == 'S':
-                        cy -= inward
-                        def_yaw = 0.0
-                    elif edge == 'E':
-                        cx += inward
-                        def_yaw = math.pi / 2.0
-                    elif edge == 'W':
-                        cx -= inward
-                        def_yaw = math.pi / 2.0
-                    else:
-                        def_yaw = 0.0  # 无 edge 则用格子中心(旧格式兼容)
+                    cx, cy, def_yaw = _obstacle_pose(obs, rows, cols, cell_sz)
                     yaw = math.radians(obs.get('yaw_deg', math.degrees(def_yaw)))
                     ax = cx - half * math.cos(yaw)
                     ay = cy - half * math.sin(yaw)
@@ -208,7 +223,7 @@ class SimRobot(object):
                 dx_ar = rx - ax
                 dy_ar = ry - ay
                 t = (dx_ar * sy - dy_ar * sx) / (-cross_rs)
-                u = (dx_ar * rdy - dy_ar * rdx) / cross_rs
+                u = -(dx_ar * rdy - dy_ar * rdx) / cross_rs
 
                 if t > 0.01 and 0.0 <= u <= 1.0:
                     if t < ranges[i]:

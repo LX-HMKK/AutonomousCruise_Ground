@@ -116,6 +116,7 @@ class MissionStateMachine(object):
         self.finish_nav_retry_count = 0
         self.recognition_in_progress = False
         self.seen_image_ids = []  # 已识别的图像 ID，防止重复
+        self.last_nav_goal = None  # 最近一次发送给 move_base 的 (x, y, yaw)
 
         # ROS 接口
         # 先创建 heartbeat publisher 并立刻发布，防止 safety 误判超时
@@ -292,6 +293,40 @@ class MissionStateMachine(object):
             return self.current_pose
         return None, None, None
 
+    def _angle_diff(self, a, b):
+        """返回两个角度之间的最短差值绝对值。"""
+        return abs(math.atan2(math.sin(a - b), math.cos(a - b)))
+
+    def _pose_near_goal(self, x, y, yaw, xy_tolerance, yaw_tolerance):
+        """用当前位姿判断是否已经足够接近目标点。"""
+        rx, ry, ryaw = self._get_current_pose()
+        if rx is None:
+            return False
+        dist = math.sqrt((rx - x)**2 + (ry - y)**2)
+        yaw_diff = self._angle_diff(ryaw, yaw)
+        return dist <= xy_tolerance and yaw_diff <= yaw_tolerance
+
+    def _get_task_footprint_status(self):
+        """返回当前任务点 footprint 校验结果。"""
+        rx, ry, ryaw = self._get_current_pose()
+        if rx is None:
+            return None, None
+        footprint = self.robot_cfg.get('footprint',
+            [[-0.175, -0.15], [-0.175, 0.15], [0.175, 0.15], [0.175, -0.15]])
+        in_region, detail = check_footprint_in_region(
+            rx, ry, ryaw, footprint, self.target_cell, self.field_cfg)
+        detail['robot_pose'] = (rx, ry, ryaw)
+        return in_region, detail
+
+    def _get_task_center_distance(self):
+        """返回当前位姿到任务点中心的距离。"""
+        rx, ry, _ = self._get_current_pose()
+        if rx is None or self.target_cell is None:
+            return None, None
+        cx, cy = get_cell_center_xy(self.target_cell, self.field_cfg)
+        dist = math.sqrt((rx - cx)**2 + (ry - cy)**2)
+        return dist, (cx, cy)
+
     def _on_safety_status(self, msg):
         """接收安全监控状态。"""
         if not msg.data.startswith('ESTOP'):
@@ -394,17 +429,30 @@ class MissionStateMachine(object):
             state = self.move_base_client.get_state()
             if state == GoalStatus.SUCCEEDED:
                 break
+            if self.last_nav_goal is not None:
+                nav_cfg = self.mission_cfg.get('navigation', {})
+                gx, gy, gyaw = self.last_nav_goal
+                if self._pose_near_goal(
+                        gx, gy, gyaw,
+                        nav_cfg.get('vision_xy_tolerance_m', 0.04),
+                        nav_cfg.get('vision_yaw_tolerance_rad', 0.12)):
+                    rospy.loginfo('[Mission] Phase %d: Vision pose reached by tolerance before move_base success',
+                                  phase)
+                    self.move_base_client.cancel_goal()
+                    break
             if state in (GoalStatus.ABORTED, GoalStatus.REJECTED,
                          GoalStatus.RECALLED, GoalStatus.PREEMPTED, GoalStatus.LOST):
                 rospy.logwarn('[Mission] Phase %d: Nav to vision failed (state=%d), retrying',
                               phase, state)
                 self._retry_perception(phase)
                 return
-            rospy.sleep(1.0)
+            poll_interval = self.mission_cfg.get('waits', {}).get('nav_poll_interval_s', 1.0)
+            rospy.sleep(poll_interval)
 
         # 到达视觉位置，触发 mock VLM
         self._stop_robot()
-        rospy.sleep(0.5)
+        trigger_delay = self.mission_cfg.get('waits', {}).get('vision_trigger_delay_s', 0.5)
+        rospy.sleep(trigger_delay)
         self.recognition_in_progress = True
         self.vision_result_event.clear()
         rospy.set_param('/top_view_shot_node/im_flag', 1)
@@ -455,10 +503,12 @@ class MissionStateMachine(object):
         stuck_timeout = self.mission_cfg['timeouts'].get('nav_stuck_timeout_s', 10.0)
         deadline = time.time() + timeout_s
 
-        # Polling loop: 每 2s 检查导航进度，检测卡死
+        # Polling loop: 按配置间隔检查导航进度，检测卡死
         last_x, last_y, last_yaw = None, None, None
         stuck_since = None
-        check_interval = 2.0
+        check_interval = self.mission_cfg.get('waits', {}).get('nav_poll_interval_s', 1.0)
+        arrived_by_footprint = False
+        arrived_by_center = False
 
         while time.time() < deadline:
             # 检查安全 abort 和全局超时
@@ -472,9 +522,24 @@ class MissionStateMachine(object):
                 return
 
             state = self.move_base_client.get_state()
-            if state in (GoalStatus.SUCCEEDED, GoalStatus.ABORTED,
-                         GoalStatus.REJECTED, GoalStatus.RECALLED,
-                         GoalStatus.PREEMPTED, GoalStatus.LOST):
+            if state == GoalStatus.SUCCEEDED:
+                break
+            in_region, _ = self._get_task_footprint_status()
+            if in_region:
+                rospy.loginfo('[Mission] Phase %d: Footprint reached before move_base success', phase)
+                arrived_by_footprint = True
+                self.move_base_client.cancel_goal()
+                break
+            center_dist, _ = self._get_task_center_distance()
+            center_tol = self.mission_cfg.get('navigation', {}).get('task_center_tolerance_m', 0.04)
+            if center_dist is not None and center_dist <= center_tol:
+                rospy.loginfo('[Mission] Phase %d: Task center reached by tolerance before move_base success (dist=%.3f <= %.3f)',
+                              phase, center_dist, center_tol)
+                arrived_by_center = True
+                self.move_base_client.cancel_goal()
+                break
+            if state in (GoalStatus.ABORTED, GoalStatus.REJECTED,
+                         GoalStatus.RECALLED, GoalStatus.PREEMPTED, GoalStatus.LOST):
                 break
 
             # 检查运动进度（卡死检测：平移 + 旋转）
@@ -498,7 +563,7 @@ class MissionStateMachine(object):
             rospy.sleep(check_interval)
 
         state = self.move_base_client.get_state()
-        arrived = (state == GoalStatus.SUCCEEDED)
+        arrived = arrived_by_footprint or arrived_by_center or (state == GoalStatus.SUCCEEDED)
 
         if not arrived:
             rospy.logwarn('[Mission] Phase %d: Navigation failed (state=%d)',
@@ -517,50 +582,44 @@ class MissionStateMachine(object):
 
         self.navigation_retry_count = 0
         self._stop_robot()
-        rospy.sleep(1.0)  # 等待位姿稳定
+        stabilize_s = self.mission_cfg.get('waits', {}).get('arrival_stabilize_s', 1.0)
+        rospy.sleep(stabilize_s)
 
         # 精准到点判定：检查 footprint 是否完全进入任务点区域
-        rx, ry, ryaw = self._get_current_pose()
-        footprint = self.robot_cfg.get('footprint',
-            [[-0.175, -0.15], [-0.175, 0.15], [0.175, 0.15], [0.175, -0.15]])
+        in_region, detail = self._get_task_footprint_status()
 
-        if rx is None:
+        if in_region is None:
             rospy.logwarn('[Mission] Phase %d: No pose available, skipping footprint check', phase)
         else:
-            in_region, detail = check_footprint_in_region(
-                rx, ry, ryaw, footprint, self.target_cell, self.field_cfg)
-
             if not in_region:
-                rospy.logwarn('[Mission] Phase %d: Footprint NOT fully inside task region! '
-                              'Outside points: %d, task_center=(%.3f,%.3f), robot=(%.3f,%.3f,%.2f)',
-                              phase, len(detail['points_outside']),
-                              detail['task_center'][0], detail['task_center'][1],
-                              rx, ry, ryaw)
-                self.footprint_retry_count += 1
-                cx, cy = detail['task_center']
-                dist_to_target = math.sqrt((rx - cx)**2 + (ry - cy)**2)
-                if self.footprint_retry_count <= 2:
-                    # 前两次：重发完整导航目标修正位置
-                    self.state_start_time = time.time()  # 重置计时，防止误超时
-                    self._send_nav_goal(cx, cy, 0.0)
-                    return
-                elif dist_to_target < 0.08 and abs(ryaw) > 0.05:
-                    # 位置已很接近但朝向不对：原地旋转对齐 yaw=0
-                    rospy.loginfo('[Mission] Phase %d: Position close, aligning yaw (%.2f rad -> 0)', phase, ryaw)
-                    self.state_start_time = time.time()
-                    self._send_nav_goal(rx, ry, 0.0)
-                    return
-                elif self.footprint_retry_count <= 5:
-                    # 位置偏差较大：回退一小段后重新靠拢
-                    rospy.loginfo('[Mission] Phase %d: Backing off and re-approaching', phase)
-                    self.state_start_time = time.time()
-                    self._send_nav_goal(cx, cy, 0.0)
-                    return
+                rx, ry, ryaw = detail['robot_pose']
+                center_dist, _ = self._get_task_center_distance()
+                center_tol = self.mission_cfg.get('navigation', {}).get('task_center_tolerance_m', 0.04)
+                if center_dist is not None and center_dist <= center_tol:
+                    rospy.logwarn('[Mission] Phase %d: Footprint outside but task center tolerance reached '
+                                  '(dist=%.3f <= %.3f), accepting position',
+                                  phase, center_dist, center_tol)
+                    in_region = True
                 else:
-                    # 多次重试仍失败，不再死循环，接受当前位置
-                    rospy.logwarn('[Mission] Phase %d: Footprint retry limit reached, accepting position', phase)
-
-            rospy.loginfo('[Mission] Phase %d: Footprint verified inside task region', phase)
+                    rospy.logwarn('[Mission] Phase %d: Footprint NOT fully inside task region! '
+                                  'Outside points: %d, task_center=(%.3f,%.3f), robot=(%.3f,%.3f,%.2f)',
+                                  phase, len(detail['points_outside']),
+                                  detail['task_center'][0], detail['task_center'][1],
+                                  rx, ry, ryaw)
+                    self.footprint_retry_count += 1
+                    cx, cy = detail['task_center']
+                    max_footprint_retries = self.mission_cfg['timeouts'].get('footprint_retry_limit', 2)
+                    if self.footprint_retry_count <= max_footprint_retries:
+                        self.state_start_time = time.time()
+                        rospy.loginfo('[Mission] Phase %d: Footprint correction %d/%d',
+                                      phase, self.footprint_retry_count, max_footprint_retries)
+                        self._send_nav_goal(cx, cy, ryaw)
+                        return
+                    else:
+                        rospy.logwarn('[Mission] Phase %d: Footprint retry limit reached (%d), accepting position',
+                                      phase, max_footprint_retries)
+            else:
+                rospy.loginfo('[Mission] Phase %d: Footprint verified inside task region', phase)
 
         self.task_cells_done.append(self.target_cell)
         rospy.loginfo('[Mission] Phase %d: Arrived at task point %d', phase, self.target_cell)
@@ -606,7 +665,8 @@ class MissionStateMachine(object):
         deadline = time.time() + timeout_s
         last_x, last_y, last_yaw = None, None, None
         stuck_since = None
-        check_interval = 2.0
+        check_interval = self.mission_cfg.get('waits', {}).get('nav_poll_interval_s', 1.0)
+        arrived_by_pose = False
 
         while time.time() < deadline:
             if self._check_aborted():
@@ -618,9 +678,21 @@ class MissionStateMachine(object):
                 return
 
             state = self.move_base_client.get_state()
-            if state in (GoalStatus.SUCCEEDED, GoalStatus.ABORTED,
-                         GoalStatus.REJECTED, GoalStatus.RECALLED,
-                         GoalStatus.PREEMPTED, GoalStatus.LOST):
+            if state == GoalStatus.SUCCEEDED:
+                break
+            if self.last_nav_goal is not None:
+                nav_cfg = self.mission_cfg.get('navigation', {})
+                gx, gy, gyaw = self.last_nav_goal
+                if self._pose_near_goal(
+                        gx, gy, gyaw,
+                        nav_cfg.get('finish_xy_tolerance_m', 0.05),
+                        nav_cfg.get('finish_yaw_tolerance_rad', 0.20)):
+                    rospy.loginfo('[Mission] Finish pose reached by tolerance before move_base success')
+                    arrived_by_pose = True
+                    self.move_base_client.cancel_goal()
+                    break
+            if state in (GoalStatus.ABORTED, GoalStatus.REJECTED,
+                         GoalStatus.RECALLED, GoalStatus.PREEMPTED, GoalStatus.LOST):
                 break
 
             rx, ry, ryaw = self._get_current_pose()
@@ -639,7 +711,7 @@ class MissionStateMachine(object):
             last_x, last_y, last_yaw = rx, ry, ryaw
             rospy.sleep(check_interval)
 
-        arrived = (self.move_base_client.get_state() == GoalStatus.SUCCEEDED)
+        arrived = arrived_by_pose or (self.move_base_client.get_state() == GoalStatus.SUCCEEDED)
 
         if not arrived:
             rospy.logwarn('[Mission] Finish navigation failed (state=%d)',
@@ -739,6 +811,7 @@ class MissionStateMachine(object):
         goal.target_pose.pose.orientation.z = quat[2]
         goal.target_pose.pose.orientation.w = quat[3]
         self.move_base_client.send_goal(goal)
+        self.last_nav_goal = (x, y, yaw)
         rospy.loginfo('[Mission] Nav goal sent: (%.3f, %.3f, %.2f rad)', x, y, yaw)
 
     def _check_global_timeouts(self):
