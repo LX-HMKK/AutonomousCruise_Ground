@@ -1,5 +1,21 @@
 <launch>
-    <!-- 实际脚本为 doubao.py (火山引擎 Ark SDK); doubao_openAI.py 为备选 (OpenAI SDK) -->
+    <!-- 相机参数 (默认对齐 perception.yaml / robot.yaml) -->
+    <arg name="video_device" default="0"/>
+    <arg name="image_width"  default="640"/>
+    <arg name="image_height" default="480"/>
+    <arg name="camera_fps"   default="15"/>
+
+    <!-- 1. USB 相机驱动: 发布 /usb_cam/image_raw (bgr8), 供 doubao.py 拍照 -->
+    <node name="usb_cam_node" pkg="abot_vlm" type="usb_cam_node.py" output="screen">
+        <param name="video_device" value="$(arg video_device)"/>
+        <param name="image_width"  value="$(arg image_width)"/>
+        <param name="image_height" value="$(arg image_height)"/>
+        <param name="fps"          value="$(arg camera_fps)"/>
+        <param name="frame_id"     value="usb_cam"/>
+        <param name="topic"        value="/usb_cam/image_raw"/>
+    </node>
+
+    <!-- 2. 豆包 VLM 识别节点 (火山引擎 Ark SDK); doubao_openAI.py 为备选 (OpenAI SDK) -->
     <node name="top_view_shot_node" pkg="abot_vlm" type="doubao.py" output="screen">
         <param name="im_flag" type="int" value="255" />
         <!--节点特定的参数，仅在该节点内有效。-->

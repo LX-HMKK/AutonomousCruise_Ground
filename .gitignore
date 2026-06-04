@@ -19,6 +19,9 @@ src/robot_slam/resources/_snowboydetect.so
 .vscode/
 .idea/
 
+# Claude Code 本地 worktree / 会话数据 (勿提交)
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -13,7 +13,7 @@ import math
 import threading
 
 from std_msgs.msg import String, Empty
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from actionlib_msgs.msg import GoalStatus
@@ -135,14 +135,27 @@ class MissionStateMachine(object):
         self.vision_result = None
         self.vision_result_event = threading.Event()
 
-        # 当前位姿（用于精准到点判定）
+        # 当前位姿（用于精准到点判定，必须是 map 坐标系）
         self.current_pose = None  # (x, y, yaw) in map frame
-        self._has_abot_pose = False  # 区分 /abot/pose 与 /odom 来源
+        # 位姿源优先级仲裁：数值越大优先级越高，低优先级源不得覆盖高优先级源。
+        #   amcl_pose(实机 map 系全局定位) > abot/pose(预留) > odom(仿真兜底)
+        # 仿真: sim_robot 只发 /odom 且已是 map 系真值, 收不到 /amcl_pose, 自动用 odom, 行为不变。
+        # 实机: AMCL 发 /amcl_pose(map 系), 用它做 footprint 判定才坐标系一致。
+        self._POSE_RANK = {'odom': 1, 'abot_pose': 2, 'amcl_pose': 3}
+        self._pose_source_rank = 0  # 当前 current_pose 的来源等级, 0=尚无位姿
+        # AMCL 协方差监控状态 (仅实机有 /amcl_pose 时更新; 仿真用 odom, 这些保持初值不触发)
+        self._amcl_pos_std = 0.0
+        self._amcl_yaw_std = 0.0
+        self._amcl_last_time = 0.0
+        self._localization_lost_since = None  # 定位发散起始时刻, None=未发散
+        # 位姿写锁：必须在注册位姿订阅之前创建，否则回调线程可能早于锁初始化触发
+        self._pose_lock = threading.Lock()
 
         # 订阅
         rospy.Subscriber('/start', String, self._on_wakeup)
         rospy.Subscriber('/vision_result', String, self._on_vision_result)
         rospy.Subscriber('/safety_status', String, self._on_safety_status)
+        rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self._on_amcl_pose)
         rospy.Subscriber('/abot/pose', PoseStamped, self._on_pose)
         rospy.Subscriber('/odom', Odometry, self._on_odom)
         rospy.Subscriber('/tts_done', String, self._on_tts_done)
@@ -151,9 +164,6 @@ class MissionStateMachine(object):
         self.tts_done_event = threading.Event()
         self.tts_done_event.set()  # 初始非等待状态
         self._tts_pending = None   # 正在等待的播报文本，防陈旧 /tts_done 误触发
-
-        # 位姿写锁，防止 _on_pose 与 _on_odom 竞争
-        self._pose_lock = threading.Lock()
 
         # 心跳定时器 (2s 间隔，独立于主循环，防止安全监控误判超时)
         self.heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._publish_heartbeat)
@@ -260,22 +270,52 @@ class MissionStateMachine(object):
         except (ValueError, KeyError, TypeError) as e:
             rospy.logerr('[Mission] Invalid vision result: %s', str(e))
 
-    def _on_pose(self, msg):
-        """接收机器人当前位姿（/abot/pose topic）。"""
-        self._has_abot_pose = True
-        q = msg.pose.orientation
-        _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
-        with self._pose_lock:
-            self.current_pose = (msg.pose.position.x, msg.pose.position.y, yaw)
+    def _update_pose(self, source, x, y, yaw):
+        """按优先级仲裁更新 current_pose：高优先级源一旦出现，低优先级源不再覆盖。
 
-    def _on_odom(self, msg):
-        """接收里程计数据，作为备选位姿来源（仿真用）。"""
-        if self._has_abot_pose:
-            return  # /abot/pose 优先级更高，忽略 /odom
+        实机用 amcl_pose(map 系)，仿真用 odom(已是 map 系真值)，保证 footprint
+        判定始终在 map 坐标系下进行。
+        """
+        rank = self._POSE_RANK[source]
+        with self._pose_lock:
+            if rank < self._pose_source_rank:
+                return  # 已有更高优先级位姿源，忽略本次低优先级数据
+            self.current_pose = (x, y, yaw)
+            if rank > self._pose_source_rank:
+                self._pose_source_rank = rank
+                rospy.loginfo('[Mission] Pose source -> %s (map frame)', source)
+
+    def _on_amcl_pose(self, msg):
+        """接收 AMCL 定位结果（/amcl_pose，map 系全局位姿）。实机精准到点的首选位姿源。
+
+        同时记录协方差(6x6, 行优先): cov[0]=var(x), cov[7]=var(y), cov[35]=var(yaw)，
+        供定位丢失监控判断粒子群是否发散。
+        """
         q = msg.pose.pose.orientation
         _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
+        cov = msg.pose.covariance
+        try:
+            pos_std = math.sqrt(max(cov[0], 0.0) + max(cov[7], 0.0))  # x,y 合成标准差
+            yaw_std = math.sqrt(max(cov[35], 0.0))
+        except (IndexError, ValueError):
+            pos_std, yaw_std = 0.0, 0.0
         with self._pose_lock:
-            self.current_pose = (msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
+            self._amcl_pos_std = pos_std
+            self._amcl_yaw_std = yaw_std
+            self._amcl_last_time = time.time()
+        self._update_pose('amcl_pose', msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
+
+    def _on_pose(self, msg):
+        """接收机器人当前位姿（/abot/pose topic，预留扩展位姿源）。"""
+        q = msg.pose.orientation
+        _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
+        self._update_pose('abot_pose', msg.pose.position.x, msg.pose.position.y, yaw)
+
+    def _on_odom(self, msg):
+        """接收里程计数据，作为备选位姿来源（仿真兜底；实机有 amcl_pose 时不采用）。"""
+        q = msg.pose.pose.orientation
+        _, _, yaw = tft.euler_from_quaternion([q.x, q.y, q.z, q.w])
+        self._update_pose('odom', msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
 
     def _on_tts_done(self, msg):
         """TTS 播报完成回调。仅当文本匹配时放行，防止陈旧信号误触发。"""
@@ -289,8 +329,9 @@ class MissionStateMachine(object):
 
     def _get_current_pose(self):
         """返回最新的机器人位姿 (x, y, yaw)，若无数据则返回 (None, None, None)。"""
-        if self.current_pose is not None:
-            return self.current_pose
+        with self._pose_lock:
+            if self.current_pose is not None:
+                return self.current_pose
         return None, None, None
 
     def _angle_diff(self, a, b):
@@ -844,6 +885,58 @@ class MissionStateMachine(object):
             rospy.logwarn('[Mission] State timeout in %s: %.1fs > %ds',
                           self.state.value, state_elapsed, max_state_time)
             self.transition(MissionState.ABORT_TIMEOUT)
+            return
+
+        self._check_localization()
+
+    def _check_localization(self):
+        """监控 AMCL 定位是否发散（粒子群协方差过大且持续）。
+
+        仅在位姿源已升级为 amcl_pose 时生效：
+          - 仿真用 odom (rank=1)，收不到 /amcl_pose，self._pose_source_rank 永远 < 3，
+            直接 return，绝不误触发。
+          - 实机当 AMCL 协方差(位置/朝向标准差)超阈值并持续 lost_duration_s 才 ABORT。
+        """
+        loc_cfg = self.mission_cfg.get('localization', {})
+        if not loc_cfg.get('monitor_enabled', True):
+            return
+
+        # 在同一锁内读取位姿源等级与协方差快照，避免 AMCL 升级瞬间的竞态窗口
+        with self._pose_lock:
+            rank = self._pose_source_rank
+            pos_std = self._amcl_pos_std
+            yaw_std = self._amcl_yaw_std
+            last_time = self._amcl_last_time
+
+        # 关键守卫：只有真正在用 amcl_pose 才监控，否则(仿真/未定位)跳过
+        if rank < self._POSE_RANK['amcl_pose']:
+            return
+
+        # AMCL 长时间无更新也视为定位异常
+        stale_s = loc_cfg.get('amcl_stale_s', 3.0)
+        now = time.time()
+        diverged = False
+        if last_time > 0 and (now - last_time) > stale_s:
+            diverged = True
+        if pos_std > loc_cfg.get('max_pos_std_m', 0.5) or \
+           yaw_std > loc_cfg.get('max_yaw_std_rad', 0.5):
+            diverged = True
+
+        if not diverged:
+            self._localization_lost_since = None
+            return
+
+        # 需持续超过 lost_duration_s 才判定丢失，避免单次抖动误触发
+        if self._localization_lost_since is None:
+            self._localization_lost_since = now
+            rospy.logwarn('[Mission] Localization diverging: pos_std=%.2fm yaw_std=%.2frad',
+                          pos_std, yaw_std)
+            return
+        lost_duration = loc_cfg.get('lost_duration_s', 3.0)
+        if now - self._localization_lost_since > lost_duration:
+            rospy.logerr('[Mission] Localization LOST (>%.1fs): pos_std=%.2fm yaw_std=%.2frad',
+                         lost_duration, pos_std, yaw_std)
+            self.transition(MissionState.ABORT_LOCALIZATION_LOST)
 
     def _retry_perception(self, phase):
         """处理识别重试：重置旋转计数器，从头开始搜索。"""

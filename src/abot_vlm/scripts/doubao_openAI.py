@@ -12,9 +12,9 @@ import time
 import base64
 from openai import OpenAI
 
-# 假设 API 密钥通过环境变量传递
+# API 密钥通过环境变量 DOUBAO_KEY 传递, 不在源码中硬编码 (遵循需求 7.10 不提交密钥)
 client = OpenAI(
-    api_key=os.environ.get("7905c74e-182a-4690-a99d-b1527a032ab5"),
+    api_key=os.environ.get("DOUBAO_KEY"),
     base_url="https://ark.cn-beijing.volces.com/api/v3",
 )
 

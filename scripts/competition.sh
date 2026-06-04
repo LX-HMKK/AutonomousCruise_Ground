@@ -93,38 +93,49 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
 
 else
     # ===== 实车模式：GNOME 终端分窗口 =====
+    # 用就绪检测替代固定 sleep, 消除启动时序竞态。
+    # 单引号定义 → 内部 $i/$1/$(seq) 不被父 shell 展开, 原样进入各窗口子 shell;
+    # timeout 包裹 rostopic list 防 XML-RPC 卡死; 超时仅告警继续, 不引入新的死等。
+    READY_HELPERS='
+wait_master() { for i in $(seq 1 40); do timeout 2 rostopic list >/dev/null 2>&1 && return 0; sleep 1; done; echo "[warn] roscore 未就绪, 继续"; }
+wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/null | grep -qx "$1" && return 0; sleep 1; done; echo "[warn] 等待 $1 超时, 继续"; }
+'
 
     # 窗口 1: roscore
     gnome-terminal -- bash -c '
         source /opt/ros/melodic/setup.bash
         roscore
         exec bash' &
-    sleep 2
+    sleep 1
 
-    # 窗口 2: 底盘 + IMU + LiDAR + EKF + 模型 (5 个节点)
+    # 窗口 2: 底盘 + IMU + LiDAR + EKF + 模型 (5 个节点) — 等 roscore 就绪
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
-        sleep 3
+        $READY_HELPERS
+        wait_master
         roslaunch abot_bringup robot_with_imu.launch
         exec bash" &
-    sleep 2
+    sleep 1
 
-    # 窗口 3: 导航栈 (map_server + AMCL + move_base)
+    # 窗口 3: 导航栈 — 等激光滤波话题就绪 (AMCL/costmap 依赖 /scan_filtered)
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
-        sleep 6
+        $READY_HELPERS
+        wait_master
+        wait_topic /scan_filtered 40
         roslaunch robot_slam navigation.launch map_name:=${MAP_NAME}
         exec bash" &
-    sleep 2
+    sleep 1
 
-    # 窗口 4: ASR 语音识别 (仅模式1) + VLM + TTS
+    # 窗口 4: ASR 语音识别 (仅模式1) + VLM + TTS — 用就绪检测替代固定 sleep
     if [ "${SIM_MODE}" = "false" ]; then
         gnome-terminal -- bash -c "
             source /opt/ros/melodic/setup.bash
             source ${WS_PATH}/devel/setup.bash
-            sleep 10
+            $READY_HELPERS
+            wait_master
             rosrun robot_slam doubao_asr.py &
             sleep 2
             roslaunch abot_vlm vlm_node.launch &
@@ -135,28 +146,33 @@ else
         gnome-terminal -- bash -c "
             source /opt/ros/melodic/setup.bash
             source ${WS_PATH}/devel/setup.bash
-            sleep 10
+            $READY_HELPERS
+            wait_master
             roslaunch abot_vlm vlm_node.launch &
             sleep 2
             rosrun robot_slam doubao_tts.py &
             exec bash" &
     fi
-    sleep 2
+    sleep 1
 
-    # 窗口 5: 任务状态机 + 安全监控
+    # 窗口 5: 任务状态机 + 安全监控 — 等 move_base 起来 (状态机要连 move_base action)
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
-        sleep 14
+        $READY_HELPERS
+        wait_master
+        wait_topic /move_base/status 60
         roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE}
         exec bash" &
-    sleep 2
+    sleep 1
 
-    # 窗口 6: RViz 可视化 (可选)
+    # 窗口 6: RViz 可视化 (可选) — 等 roscore 就绪
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
-        sleep 16
+        $READY_HELPERS
+        wait_master
+        wait_topic /map 30
         roslaunch robot_slam view_nav.launch
         exec bash" &
 
