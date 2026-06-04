@@ -675,6 +675,7 @@ class MissionStateMachine(object):
                 return
             else:
                 rospy.logwarn('[Mission] Max finish nav retries exceeded, proceeding anyway')
+                self.move_base_client.cancel_goal()
         else:
             self.finish_nav_retry_count = 0
 
