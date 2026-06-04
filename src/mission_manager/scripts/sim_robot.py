@@ -25,7 +25,11 @@ import tf
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist, Quaternion, TransformStamped
-from visualization_msgs.msg import Marker, MarkerArray
+try:
+    from visualization_msgs.msg import Marker, MarkerArray
+    HAS_MARKER = True
+except ImportError:
+    HAS_MARKER = False
 
 # config 路径
 CONFIG_PATHS = [
@@ -89,11 +93,10 @@ class SimRobot(object):
         # 发布
         self.odom_pub = rospy.Publisher('/odom', Odometry, queue_size=10)
         self.scan_pub = rospy.Publisher('/scan_filtered', LaserScan, queue_size=10)
-        self.obs_marker_pub = rospy.Publisher('/sim_obstacles', MarkerArray, queue_size=10)
+        if HAS_MARKER:
+            self.obs_marker_pub = rospy.Publisher('/sim_obstacles', MarkerArray, queue_size=10)
+            self._publish_obstacle_markers()
         self.tf_br = tf.TransformBroadcaster()
-
-        # 预发布障碍物 Marker (只发一次, latch 到后续订阅者)
-        self._publish_obstacle_markers()
 
         # 订阅 cmd_vel 模拟运动
         rospy.Subscriber('/cmd_vel', Twist, self._on_cmd_vel)
@@ -243,7 +246,7 @@ class SimRobot(object):
             self._publish_scan()
             self._publish_tf()
             tick += 1
-            if tick % 10 == 0:  # 每 0.5s 刷新 Marker
+            if HAS_MARKER and tick % 10 == 0:
                 self._publish_obstacle_markers()
             rate.sleep()
 
