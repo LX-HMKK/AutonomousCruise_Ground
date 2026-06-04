@@ -75,7 +75,12 @@ class MockVLM(object):
             return
 
         vision_cell = self.vision_positions[self.current_index]
-        target_cell = self.vision_to_task.get(vision_cell)
+        vinfo = self.vision_to_task.get(vision_cell, {})
+        # 兼容两种格式: {target, yaw_rad} 或纯数字
+        if isinstance(vinfo, dict):
+            target_cell = vinfo.get('target')
+        else:
+            target_cell = vinfo
         image_id = 'mock_image_%d' % (self.current_index + 1)
 
         rospy.loginfo('[MockVLM] Task %d/%d: vision=%d → target=%d (conf=%.2f)',

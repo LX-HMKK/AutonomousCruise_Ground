@@ -367,10 +367,18 @@ class MissionStateMachine(object):
         if self._check_aborted():
             return
 
-        rospy.loginfo('[Mission] Phase %d: Navigating to vision position cell %d (%.3f, %.3f)',
-                      phase, vision_cell, x, y)
+        # 获取车头朝向 (对墙拍照)
+        v2t = self.field_cfg.get('vision_to_task', {})
+        vinfo = v2t.get(vision_cell, {})
+        if isinstance(vinfo, dict):
+            yaw = vinfo.get('yaw_rad', 0.0)
+        else:
+            yaw = 0.0  # 兼容旧格式 (纯数字)
+
+        rospy.loginfo('[Mission] Phase %d: Navigating to vision position cell %d (%.3f, %.3f, yaw=%.2f)',
+                      phase, vision_cell, x, y, yaw)
         self._stop_robot()
-        self._send_nav_goal(x, y)
+        self._send_nav_goal(x, y, yaw)
         self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
 
     def _handle_recognize_task_image(self, phase):
