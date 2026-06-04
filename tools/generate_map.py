@@ -64,7 +64,7 @@ def generate_map(config_path, output_name):
     # ---- 网格线 (浅灰, 不影响导航) ----
     grid_gray = 200
     for r in range(1, grid_rows):
-        y = -field_h / 2 + r * cell_sz
+        y = field_h / 2 - r * cell_sz
         x1, _ = world_to_pixel(-field_w / 2, y)
         x2, _ = world_to_pixel(field_w / 2, y)
         _, py = world_to_pixel(0, y)
