@@ -41,18 +41,21 @@
 ```
 .
 ├── config/                              # 比赛参数配置（禁止硬编码）
-│   ├── competition_field.yaml           # 场地尺寸、网格、起终点、任务点、障碍物
-│   ├── mission.yaml                     # 任务超时、重试次数、置信度阈值
+│   ├── competition_field.yaml           # 场地/网格/起终点/任务点/视觉点/障碍物(edge格式)
+│   ├── mission.yaml                     # 超时/重试/置信度/地图名/等待时长
 │   ├── robot.yaml                       # 机器人 footprint、传感器参数
-│   ├── navigation.yaml                  # costmap、DWA、规划器参数
+│   ├── navigation.yaml                  # costmap、DWA、规划器参数（参考）
 │   ├── perception.yaml                  # VLM prompt 模板、相机设置
 │   └── voice_text.yaml                  # 播报文本模板（12 条）
 ├── src/                                 # ROS 功能包
 │   ├── mission_manager/                 # 【核心】任务状态机 + 安全监控 + 仿真 mock
 │   ├── common/                          # 配置加载、日志、网格坐标转换
-│   ├── robot_slam/                      # 导航定位/建图/ASR/唤醒词（核心复用）
+│   ├── robot_slam/                      # 导航定位/建图/ASR/唤醒词
 │   ├── abot_base/                       # ABOT 底盘驱动/IMU/URDF 模型/激光滤波
 │   └── abot_vlm/                        # 豆包大模型视觉识别（任务图像）
+├── tools/                               # Windows 端工具
+│   ├── generate_map.py                  # YAML → PGM 地图生成（围栏+网格线）
+│   └── mark_map_gui.py                  # PGM 可视化标点（含车头朝向）
 ├── launch/
 │   └── ground_cruise.launch             # 比赛统一启动入口
 ├── scripts/                             # 远端 ABOT 启动脚本（参考）
@@ -67,11 +70,11 @@
 
 | 文件 | 职责 |
 |---|---|
-| `scripts/mission_state_machine.py` | 完整状态机：IDLE → WAIT_FOR_WAKEUP → START_ANNOUNCE → SEARCH/RECOGNIZE/NAVIGATE/ARRIVE/ANNOUNCE × 4 → NAVIGATE_TO_FINISH → FINISH_ANNOUNCE → DONE。6 个异常状态。旋转搜索、footprint 判定、图像去重、感知重试。TTS 播报等待 `/tts_done` 回调。 |
-| `scripts/safety_monitor.py` | 安全监控：激光碰撞检测（<0.10m 急停）、里程计运动监控、heartbeat watchdog（5s 超时） |
-| `scripts/mock_vlm.py` | Mock VLM 仿真：按预设序列发布 `/vision_result`，支持 WSL 无摄像头测试 |
-| `scripts/mock_tts.py` | Mock TTS 仿真：订阅 `/voiceWords`，按字数估算时长后发布 `/tts_done`（M4 新增） |
-| `scripts/sim_robot.py` | 仿真机器人：发布 odom + scan + TF，订阅 cmd_vel 模拟运动 |
+| `scripts/mission_state_machine.py` | 完整状态机：WAKEUP → 导航到视觉点(5/37/45/77) → 触发VLM获取任务区号 → 导航到任务区(31-51) → footprint判定 → 播报 → 循环4次 → 导航到终点(9) → DONE。6个异常状态。支持车头朝向对齐、视觉重试、导航卡死检测。 |
+| `scripts/safety_monitor.py` | 安全监控：激光碰撞检测、里程计运动监控、heartbeat watchdog（5s 超时） |
+| `scripts/mock_vlm.py` | Mock VLM：从 `competition_field.yaml` 读取 `vision_to_task` 映射，按序返回目标任务区号 |
+| `scripts/mock_tts.py` | Mock TTS：订阅 `/voiceWords`，按字数估算时长后发布 `/tts_done` |
+| `scripts/sim_robot.py` | 仿真机器人：odom + scan(含线段障碍物射线追踪) + 完整TF链(map→base_footprint→base_link→laser_link) + joint_states心跳 + 障碍物MarkerArray可视化 |
 
 #### common（新建，Python）
 公共工具包，提供配置加载、日志、坐标变换。
@@ -91,7 +94,7 @@
 | 唤醒词 | `scripts/start.py` + `resources/models/startGame.pmdl` | Snowboy 热词检测，触发后发布 `/start` |
 | 语音识别 | `scripts/demo.py` + `scripts/paraformer-zh/` | FunASR Paraformer 中文识别（10s 录音），发布 `/chinese_topic` |
 | 建图 | `launch/gmapping.launch` `launch/hector_mapping.launch` | Gmapping / Hector SLAM 建图 |
-| 地图 | `maps/my_lab.yaml, my_map.yaml, shoot.yaml` | 先验地图（仿真用） |
+| 地图 | `maps/competition_field.yaml, game.yaml, my_lab.yaml` | 先验地图（仿真用 competition_field 3.6m 场地, game 实赛场） |
 
 #### abot_base（复用，C++）
 ABOT 机器人底层硬件驱动，**不改动**。
@@ -122,32 +125,50 @@ catkin_make
 source devel/setup.bash
 ```
 
-### 启动仿真任务（WSL 一键启动）
+### 启动仿真（WSL，推荐）
 
 ```bash
-source /opt/ros/melodic/setup.bash && source ~/abot_ws/devel/setup.bash && roslaunch mission_manager sim_full_mission.launch
+# 一键：同步源码 → 启动 → 监控 → 报告
+bash /mnt/d/StudyWorks/3.2/MachineVision_Project/AutonomousCruise_Ground/scripts/sim_full_test.sh
 ```
 
-自动启动全部 9 个节点（map_server + robot_state_publisher + sim_robot + move_base + mock_vlm + 状态机 + 安全监控 + RViz），5 秒后自动唤醒开始比赛流程。
+自动完成：清理 → 同步 Windows 源码到 WSL → 启动 9 个节点 → 等待比赛完成 → 输出报告。
 
-### 启动完整比赛（实车）
+### 启动仿真（直接 roslaunch，需先同步）
 
 ```bash
-roslaunch launch/ground_cruise.launch sim_mode:=false map_name:=competition_field
+# 先手动同步一次
+cp /mnt/d/.../src/mission_manager/**/*.py ~/abot_ws/src/mission_manager/
+cp /mnt/d/.../config/*.yaml ~/abot_ws/config/
+cp /mnt/d/.../src/robot_slam/maps/competition_field.* ~/abot_ws/src/robot_slam/maps/
+
+# 再启动
+source /opt/ros/melodic/setup.bash && source ~/abot_ws/devel/setup.bash
+roslaunch mission_manager sim_full_mission.launch map_name:=competition_field
 ```
 
 ### 修改比赛参数
 
 编辑 `config/` 目录下的 YAML 文件，无需重新编译：
 
-| 文件 | 修改内容 |
+| 文件 | 关键配置 |
 |---|---|
-| `competition_field.yaml` | 场地尺寸、起终点、任务点坐标、障碍物布局 |
-| `mission.yaml` | 总时长、超时时间、重试次数、置信度阈值 |
-| `robot.yaml` | 机器人尺寸、footprint、传感器话题 |
-| `navigation.yaml` | 速度限制、到点容差、costmap 参数 |
-| `perception.yaml` | VLM 模型、prompt 模板、相机分辨率 |
-| `voice_text.yaml` | 各阶段播报文本（支持 `{index}` / `{target_cell}` 变量） |
+| `competition_field.yaml` | 场地尺寸、vision_positions(视觉点)、vision_to_task(视觉→任务区映射,含yaw)、obstacles(cell+edge格式) |
+| `mission.yaml` | map_name(地图切换)、总时长、超时、重试、waits(到达稳定/VLM触发/导航轮询) |
+| `robot.yaml` | 尺寸、footprint |
+| `costmap_common_params.yaml` | inflation_radius(膨胀层)、footprint |
+| `dwa_local_planner_params.yaml` | xy_goal_tolerance(到达容差)、occdist_scale(避障权重)、速度/加速度 |
+| `voice_text.yaml` | 各阶段播报模板 |
+
+### 障碍物配置
+
+```yaml
+# competition_field.yaml — edge 格式, 挡板居中放在网格线上
+obstacles:
+  - { cell: 19, edge: S }   # 19号南边, 水平挡板
+  - { cell: 22, edge: E }   # 22号东边, 竖直挡板
+  # edge: N/S/E/W, 自动对齐边方向, yaw_deg 可覆盖
+```
 
 ## 开发进度
 

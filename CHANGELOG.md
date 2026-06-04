@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+### M7+ — 仿真系统重构 (2026-06-04)
+
+#### Added
+- **地图生成器** `tools/generate_map.py`：从 YAML 配置生成 PGM 地图，含围栏、9×9 网格线
+- **障碍物系统**：YAML 配置 `{cell, edge}` 格式（edge=N/S/E/W），挡板居中放在网格线上；sim_robot 线段射线追踪模拟 LiDAR 检测；MarkerArray 发布实心薄板可视化
+- **TF 可靠性**：`sim_robot` 发布 `/joint_states` 心跳驱动 `robot_state_publisher`，消除 `base_link does not exist`
+- **视觉朝向**：`vision_to_task` 扩展为 `{target, yaw_rad}`，导航到视觉点时车头对墙
+- **等待时长可配**：`mission.yaml` 新增 `waits` 字段（`arrival_stabilize_s`/`vision_trigger_delay_s`/`nav_poll_interval_s`）
+- **代价地图可视化**：RViz 局部代价地图改用 `raw` 配色（所有格子可见），Cost Cloud 彩虹点云，障碍物 MarkerArray 显示
+
+#### Changed
+- **视觉导航流程**：`SEARCH_TASK_IMAGE` 从旋转扫描改为导航到 `vision_positions[5,37,45,77]`；`RECOGNIZE_TASK_IMAGE` 改为到达视觉点→触发VLM→获取任务区号
+- **地图切换**：`mission.yaml` 新增 `map_name` 字段作为唯一地图配置源，`sim_full_test.sh` 自动读取
+- **脚本**：`sim_full_test.sh` 重写（165→65 行），修复 ROS_MASTER_URI 丢失/固定 sleep/交互阻塞/`rostopic` 超时
+- **默认地图**：`game` → `competition_field`
+- **状态机**：移除 `_search_rotation` 旋转搜索逻辑、`rotation_attempt`、`_vision_handled_by_cb`
+- **mark_map_gui**：新增两点点击标定车头朝向（yaw），箭头渲染
+
+#### Fixed
+- `sim_full_test.sh` 5 处卡死：`grep -P` locale 限制、ROS_MASTER_URI 丢失、固定 `sleep 20`、`read -r` 阻塞、`rostopic echo` 无超时
+- `sim_robot.py`：`self.obstacle_xy` → `self.obstacle_segments` 变量名错误导致节点崩溃
+- `sim_robot.py`：`visualization_msgs` 导入容错
+- `sim_robot.py`：YAML 加载 try/except 防崩溃
+- PGM 网格线 y 坐标镜像翻转（`-1.8+r*0.4` → `1.8-r*0.4`）
+- PGM 像素转换 `int()` 截断改为 `int(round())`，消除 1px 漂移
+- 膨胀层：`inflation_radius: 0.22 → 0.005`
+- `grep -c` 零匹配时双输出导致 `NODE_COUNT='0\n0'`
+- `sim_navigation.launch` 新增 `joint_state_publisher`
+
+#### Removed
+- PGM 静态障碍物绘制（改为 sim_robot LiDAR 动态注入）
+
 ### M7+ — 代码审计修复 (2026-06-04)
 
 #### Fixed

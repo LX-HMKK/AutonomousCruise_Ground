@@ -40,7 +40,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Source 环境：`source abot_ws/devel/setup.bash`
 - 启动完整仿真（推荐，10 个节点）：
   ```bash
-  source /opt/ros/melodic/setup.bash && source ~/abot_ws/devel/setup.bash && roslaunch mission_manager sim_full_mission.launch
+  # 推荐: 一键脚本 (自动同步源码到 WSL)
+  bash /mnt/d/StudyWorks/3.2/MachineVision_Project/AutonomousCruise_Ground/scripts/sim_full_test.sh
+  
+  # 或直接 roslaunch (需先同步源码到 WSL)
+  source /opt/ros/melodic/setup.bash && source ~/abot_ws/devel/setup.bash && roslaunch mission_manager sim_full_mission.launch map_name:=competition_field
   ```
 - 仅启动导航仿真测试（4 个节点，无 VLM/状态机）：
   ```bash
