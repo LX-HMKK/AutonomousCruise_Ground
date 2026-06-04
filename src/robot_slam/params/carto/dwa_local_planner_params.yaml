@@ -38,7 +38,7 @@ DWAPlannerROS:
   # ---- 代价权重 (避障行为核心) ----
   path_distance_bias: 32.0  # 跟全局路径的权重, 越大越贴路径
   goal_distance_bias: 24.0  # 朝目标前进的权重, 越大越直接
-  occdist_scale: 0.03       # 避障权重, 越大离障碍物越远 (0.01~0.10)
+  occdist_scale: 0.01       # 避障权重, 越大离障碍物越远 (0.01~0.10)
 
   # ---- 其他 ----
   forward_point_distance: 0.325

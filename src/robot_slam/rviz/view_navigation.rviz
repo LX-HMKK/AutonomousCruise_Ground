@@ -360,6 +360,12 @@ Visualization Manager:
           Value: false
       Enabled: true
       Name: Local Map
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Name: Obstacles (仿真障碍物)
+      Topic: /sim_obstacles
+      Queue Size: 10
+      Value: true
     - Alpha: 1
       Arrow Length: 0.20000000298023224
       Axes Length: 0.30000001192092896

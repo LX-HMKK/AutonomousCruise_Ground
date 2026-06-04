@@ -25,6 +25,7 @@ import tf
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist, Quaternion, TransformStamped
+from visualization_msgs.msg import Marker, MarkerArray
 
 # config 路径
 CONFIG_PATHS = [
@@ -81,7 +82,11 @@ class SimRobot(object):
         # 发布
         self.odom_pub = rospy.Publisher('/odom', Odometry, queue_size=10)
         self.scan_pub = rospy.Publisher('/scan_filtered', LaserScan, queue_size=10)
+        self.obs_marker_pub = rospy.Publisher('/sim_obstacles', MarkerArray, queue_size=10)
         self.tf_br = tf.TransformBroadcaster()
+
+        # 预发布障碍物 Marker (只发一次, latch 到后续订阅者)
+        self._publish_obstacle_markers()
 
         # 订阅 cmd_vel 模拟运动
         rospy.Subscriber('/cmd_vel', Twist, self._on_cmd_vel)
@@ -159,6 +164,33 @@ class SimRobot(object):
         msg.intensities = [0.0] * num_readings
         self.scan_pub.publish(msg)
 
+    def _publish_obstacle_markers(self):
+        """发布障碍物可视化 Marker (实心方块, RViz 可看到完整形状)。"""
+        ma = MarkerArray()
+        for i, (ox, oy, orad) in enumerate(self.obstacle_xy):
+            m = Marker()
+            m.header.frame_id = 'map'
+            m.header.stamp = rospy.Time.now()
+            m.ns = 'sim_obstacles'
+            m.id = i
+            m.type = Marker.CUBE
+            m.action = Marker.ADD
+            m.pose.position.x = ox
+            m.pose.position.y = oy
+            m.pose.position.z = 0.15  # 半高
+            m.pose.orientation.w = 1.0
+            # 障碍物尺寸: 40cm×30cm×30cm (挡板)
+            m.scale.x = 0.40
+            m.scale.y = 0.30
+            m.scale.z = 0.30
+            m.color.r = 1.0
+            m.color.g = 0.3
+            m.color.b = 0.1
+            m.color.a = 0.8
+            m.lifetime = rospy.Duration(0.5)  # 需要周期性刷新
+            ma.markers.append(m)
+        self.obs_marker_pub.publish(ma)
+
     def _publish_tf(self):
         now = rospy.Time.now()
         q = tf.transformations.quaternion_from_euler(0, 0, self.yaw)
@@ -185,10 +217,14 @@ class SimRobot(object):
 
     def run(self):
         rate = rospy.Rate(20)
+        tick = 0
         while not rospy.is_shutdown():
             self._publish_odom()
             self._publish_scan()
             self._publish_tf()
+            tick += 1
+            if tick % 10 == 0:  # 每 0.5s 刷新 Marker
+                self._publish_obstacle_markers()
             rate.sleep()
 
 

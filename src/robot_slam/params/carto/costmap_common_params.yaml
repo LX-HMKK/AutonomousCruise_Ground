@@ -17,11 +17,11 @@ footprint: [[-0.175, -0.15], [-0.175, 0.15], [0.175, 0.15], [0.175, -0.15]]
 # ---- 膨胀层 (核心调参项) ----
 # 膨胀半径: 障碍物周围不可通行区域半径
 # 3.6m 小场地建议 0.10~0.18, 太大则机器人找不到路
-inflation_radius: 0.22
+inflation_radius: 0.1
 
 # 代价衰减系数: 越大代价衰减越快, 障碍物影响范围越小
 # 范围 1~20, 小场地建议 5~15
-cost_scaling_factor: 10.0
+cost_scaling_factor: 13.0
 
 map_type: costmap
 observation_sources: scan
