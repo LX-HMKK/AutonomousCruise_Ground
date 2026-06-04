@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """豆包 ASR 节点：录音 → 豆包语音识别 → 检测到"开始比赛" → 发布 /start。
 
-豆包 ASR 使用火山引擎语音服务 (非方舟 Ark SDK)，模型 ID: volc.seedasr.auc。
-认证: Bearer Token (Ark API Key 通用)。
+豆包 ASR 使用火山引擎语音识别大模型极速版 HTTP API。
+认证: X-Api-App-Key + X-Api-Access-Key。
 """
 
 import rospy
@@ -15,13 +15,16 @@ import tempfile
 import pyaudio
 import wave
 import requests
+import base64
+import uuid as _uuid
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
 from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_ASR_RESOURCE_ID
 
 # ---- ASR 配置 ----
-ASR_API_URL = "https://openspeech.bytedance.com/api/v1/asr"
+ASR_API_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"
+ASR_RESOURCE_ID = "volc.bigasr.auc_turbo"
 
 # ---- 录音参数 ----
 SAMPLE_RATE = 16000
@@ -58,8 +61,8 @@ class DoubaoASR(object):
         self.appid = SPEECH_APPID
         self.token = SPEECH_TOKEN
         self.resource_id = SPEECH_ASR_RESOURCE_ID
-        rospy.loginfo('[DoubaoASR] Ready. resource=%s appid=%s',
-                      self.resource_id, self.appid)
+        rospy.loginfo('[DoubaoASR] Ready. instance=%s api_resource=%s appid=%s',
+                      self.resource_id, ASR_RESOURCE_ID, self.appid)
 
     def run(self):
         rate = rospy.Rate(0.5)
@@ -86,7 +89,7 @@ class DoubaoASR(object):
             rate.sleep()
 
     def _recognize(self, audio_path):
-        """调用豆包语音识别 HTTP API。"""
+        """调用豆包语音识别大模型极速版 HTTP API。"""
         if not self.token:
             rospy.logerr('[DoubaoASR] API key not set')
             return None
@@ -94,30 +97,41 @@ class DoubaoASR(object):
             with open(audio_path, 'rb') as f:
                 audio_data = f.read()
             headers = {
-                'Authorization': 'Bearer; ' + self.token,
-                'Resource-Id': self.resource_id,
+                'X-Api-App-Key': self.appid,
+                'X-Api-Access-Key': self.token,
+                'X-Api-Resource-Id': ASR_RESOURCE_ID,
+                'X-Api-Request-Id': str(_uuid.uuid4()),
+                'X-Api-Sequence': '-1',
                 'Content-Type': 'application/json',
             }
-            import base64, uuid as _uuid
             body = {
-                'appid': self.appid,
-                'reqid': str(_uuid.uuid4()),
-                'audio': base64.b64encode(audio_data).decode('utf-8'),
-                'audio_format': 'wav',
-                'sample_rate': SAMPLE_RATE,
+                'user': {'uid': 'abot_robot'},
+                'audio': {
+                    'format': 'wav',
+                    'data': base64.b64encode(audio_data).decode('utf-8'),
+                },
+                'request': {
+                    'model_name': 'bigmodel',
+                    'enable_itn': True,
+                    'enable_punc': True,
+                },
             }
             resp = requests.post(ASR_API_URL, headers=headers, json=body, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                # 火山引擎 ASR 返回格式: {"result": [{"text": "..."}]}
-                if 'result' in data and data['result']:
-                    return data['result'][0].get('text', '').strip()
-                elif 'text' in data:
-                    return data['text'].strip()
-                return str(data)
-            else:
-                rospy.logwarn('[DoubaoASR] HTTP %d: %s', resp.status_code, resp.text[:200])
+            status_code = resp.headers.get('X-Api-Status-Code', '')
+            message = resp.headers.get('X-Api-Message', '')
+            logid = resp.headers.get('X-Tt-Logid', '')
+            if status_code != '20000000':
+                rospy.logwarn('[DoubaoASR] ASR failed: http=%d code=%s msg=%s logid=%s',
+                              resp.status_code, status_code, message, logid)
                 return None
+
+            data = resp.json()
+            result = data.get('result', {})
+            if isinstance(result, dict):
+                return result.get('text', '').strip()
+            if isinstance(result, list) and result:
+                return result[0].get('text', '').strip()
+            return data.get('text', '').strip()
         except Exception as e:
             rospy.logerr('[DoubaoASR] Recognition failed: %s', e)
             return None

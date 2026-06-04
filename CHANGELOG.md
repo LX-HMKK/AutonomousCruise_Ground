@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### M7+ — 语音 ASR 极速版接入 (2026-06-05)
+
+#### Changed
+- `doubao_asr.py` 从旧 `/api/v1/asr` 调用切换为豆包语音识别大模型极速版 `recognize/flash`，使用 `audio.data` 传本地 WAV 的 base64 内容
+- ASR 请求头改为 `X-Api-App-Key`/`X-Api-Access-Key`/`X-Api-Resource-Id=volc.bigasr.auc_turbo`，匹配极速版官方 API
+
+#### Added
+- `tools/test_doubao_asr_flash.py`：验证极速版 ASR 请求 URL、headers、body 和返回文本解析
+
 ### M7+ — 仿真系统重构 (2026-06-04)
 
 #### Added
