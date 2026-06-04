@@ -69,26 +69,30 @@ class SimRobot(object):
         self.yaw = init_yaw
 
         # 加载障碍物 (从 competition_field.yaml) — 建模为线段(纸板)
-        self.obstacle_segments = []  # [(ax, ay, bx, by), ...]
-        config_path = _find_config('competition_field.yaml')
-        if config_path:
-            with open(config_path, 'r') as f:
-                cfg = yaml.safe_load(f)
-            field = cfg['field']
-            board_w = 0.40  # 挡板宽度 (m)
-            for obs in (cfg.get('obstacles') or []):
-                cx, cy = _cell_to_xy(obs['cell'],
-                                     field['grid_rows'], field['grid_cols'],
-                                     field['cell_size_m'], field['size_m'][0])
-                yaw = math.radians(obs.get('yaw_deg', 45))  # 挡板朝向, 默认45°
-                half = board_w / 2.0
-                ax = cx - half * math.cos(yaw)
-                ay = cy - half * math.sin(yaw)
-                bx = cx + half * math.cos(yaw)
-                by = cy + half * math.sin(yaw)
-                self.obstacle_segments.append((ax, ay, bx, by, cx, cy))
-            if self.obstacle_segments:
-                rospy.loginfo('[SimRobot] %d board obstacles loaded', len(self.obstacle_segments))
+        self.obstacle_segments = []
+        try:
+            config_path = _find_config('competition_field.yaml')
+            if config_path:
+                with open(config_path, 'r') as f:
+                    cfg = yaml.safe_load(f)
+                field = cfg['field']
+                board_w = 0.40
+                for obs in (cfg.get('obstacles') or []):
+                    cx, cy = _cell_to_xy(obs['cell'],
+                                         field['grid_rows'], field['grid_cols'],
+                                         field['cell_size_m'], field['size_m'][0])
+                    yaw = math.radians(obs.get('yaw_deg', 45))
+                    half = board_w / 2.0
+                    ax = cx - half * math.cos(yaw)
+                    ay = cy - half * math.sin(yaw)
+                    bx = cx + half * math.cos(yaw)
+                    by = cy + half * math.sin(yaw)
+                    self.obstacle_segments.append((ax, ay, bx, by, cx, cy))
+                if self.obstacle_segments:
+                    rospy.loginfo('[SimRobot] %d board obstacles loaded', len(self.obstacle_segments))
+        except Exception as e:
+            rospy.logwarn('[SimRobot] Failed to load obstacles: %s (continuing without)', e)
+            self.obstacle_segments = []
 
         # 发布
         self.odom_pub = rospy.Publisher('/odom', Odometry, queue_size=10)
