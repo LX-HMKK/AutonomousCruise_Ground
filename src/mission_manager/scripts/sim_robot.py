@@ -107,7 +107,7 @@ class SimRobot(object):
         self.last_time = rospy.Time.now()
 
         rospy.loginfo('[SimRobot] Init at (%.2f, %.2f, %.2f)  obstacles=%d',
-                      self.x, self.y, self.yaw, len(self.obstacle_xy))
+                      self.x, self.y, self.yaw, len(self.obstacle_segments))
 
     def _on_cmd_vel(self, msg):
         now = rospy.Time.now()
