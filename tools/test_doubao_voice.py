@@ -4,10 +4,10 @@
 import os, sys, requests, json, uuid, base64, time, wave, struct, math
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN
+from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_RESOURCE_ID
 
 AUTH = 'Bearer; ' + SPEECH_TOKEN
-RID = '7654152222'  # 用户 Resource ID
+RID = SPEECH_RESOURCE_ID
 
 
 def test_tts():
