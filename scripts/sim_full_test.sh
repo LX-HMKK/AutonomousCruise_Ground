@@ -10,7 +10,9 @@ SRC="/mnt/d/StudyWorks/3.2/MachineVision_Project/AutonomousCruise_Ground"
 source /opt/ros/melodic/setup.bash
 source "$WS"/devel/setup.bash
 
-echo "=== ABOT 地面巡航 完整仿真 ==="
+# 从 mission.yaml 读取地图名
+MAP_NAME=$(python -c "import yaml; print(yaml.safe_load(open('$SRC/config/mission.yaml'))['mission']['map_name'])" 2>/dev/null || echo "competition_field")
+echo "=== ABOT 地面巡航 完整仿真 (地图: $MAP_NAME) ==="
 START=$(date +%s)
 
 # 1. 清理
@@ -24,11 +26,11 @@ mkdir -p "$WS"/src/mission_manager/launch "$WS"/config
 cp "$SRC"/src/mission_manager/scripts/*.py "$WS"/src/mission_manager/scripts/
 cp "$SRC"/src/mission_manager/launch/*.launch "$WS"/src/mission_manager/launch/
 cp "$SRC"/config/*.yaml "$WS"/config/
-cp "$SRC"/src/robot_slam/maps/competition_field.* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
+cp "$SRC"/src/robot_slam/maps/"$MAP_NAME".* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
 
 # 3. 启动
-echo "[3/4] 启动仿真..."
-roslaunch mission_manager sim_full_mission.launch > "$LOG" 2>&1 &
+echo "[3/4] 启动仿真 (map_name=$MAP_NAME)..."
+roslaunch mission_manager sim_full_mission.launch map_name:="$MAP_NAME" > "$LOG" 2>&1 &
 PID=$!
 
 # 等日志出现

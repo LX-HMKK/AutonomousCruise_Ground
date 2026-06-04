@@ -2,6 +2,7 @@
 # 比赛任务全局参数：超时、重试、语音要求
 
 mission:
+  map_name: competition_field
   max_time_s: 180
   required_task_image_count: 4
   require_start_voice: true
