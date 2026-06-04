@@ -115,7 +115,6 @@ class MissionStateMachine(object):
         self.footprint_retry_count = 0  # 防止 footprint 检查死循环
         self.finish_nav_retry_count = 0
         self.recognition_in_progress = False
-        self.rotation_attempt = 0
         self.seen_image_ids = []  # 已识别的图像 ID，防止重复
 
         # ROS 接口
@@ -154,9 +153,6 @@ class MissionStateMachine(object):
 
         # 位姿写锁，防止 _on_pose 与 _on_odom 竞争
         self._pose_lock = threading.Lock()
-
-        # 识别回调已处理标志，防止 rotation_attempt 双计数
-        self._vision_handled_by_cb = False
 
         # 心跳定时器 (2s 间隔，独立于主循环，防止安全监控误判超时)
         self.heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._publish_heartbeat)
@@ -241,17 +237,10 @@ class MissionStateMachine(object):
             rospy.loginfo('[Mission] Vision result: cell=%s, confidence=%.2f, id=%s',
                           result.get('target_cell'), confidence, image_id)
 
-            # 检查是否已识别过同一张图像
             phase = self.task_index + 1
             if image_id and image_id in self.seen_image_ids:
-                rospy.logwarn('[Mission] Phase %d: Image %s already recognized! Rotating...',
-                              phase, image_id)
-                self.rotation_attempt += 1
-                self._vision_handled_by_cb = True
-                if self.rotation_attempt < 4:
-                    self._search_rotation(phase)
-                else:
-                    self._retry_perception(phase)
+                rospy.logwarn('[Mission] Phase %d: Duplicate image %s, retrying...', phase, image_id)
+                self._retry_perception(phase)
                 return
 
             if confidence >= min_conf:
@@ -260,19 +249,13 @@ class MissionStateMachine(object):
                     self.seen_image_ids.append(image_id)
                 self.logger.log_perception(result)
                 self.perception_retry_count = 0
-                self.rotation_attempt = 0
                 self.recognition_in_progress = False
                 self.vision_result = result
                 self.vision_result_event.set()
             else:
-                rospy.logwarn('[Mission] Low confidence %.2f < %.2f',
+                rospy.logwarn('[Mission] Low confidence %.2f < %.2f, retrying...',
                               confidence, min_conf)
-                self.rotation_attempt += 1
-                self._vision_handled_by_cb = True
-                if self.rotation_attempt < 4:
-                    self._search_rotation(phase)
-                else:
-                    self._retry_perception(phase)
+                self._retry_perception(phase)
         except (ValueError, KeyError, TypeError) as e:
             rospy.logerr('[Mission] Invalid vision result: %s', str(e))
 
@@ -373,90 +356,63 @@ class MissionStateMachine(object):
         elif current_step == 'ANNOUNCE_TASK':
             self._handle_announce_task(phase)
 
-    def _search_rotation(self, phase):
-        """旋转机器人扫描围栏不同方向，寻找任务图像。
-
-        每旋转 90 度触发一次相机，最多 4 次（360 度）。
-        找到图像后自动跳转 RECOGNIZE 状态。
-        """
-        self._stop_robot()
-        rospy.sleep(0.5)
-
-        # 旋转 90 度 (角速度 0.78 rad/s，仿真下缩短)
-        twist = Twist()
-        twist.angular.z = 0.78
-
-        rospy.loginfo('[Mission] Phase %d: Rotating to scan fence (attempt %d/4)...',
-                      phase, self.rotation_attempt + 1)
-
-        # 清除之前的识别结果，防止中断旋转循环
-        self.vision_result_event.clear()
-
-        # 发布旋转指令
-        rot_dur = 1.5 if self.sim_mode else 2.0
-        end_time = rospy.Time.now() + rospy.Duration(rot_dur)
-        while rospy.Time.now() < end_time and not rospy.is_shutdown():
-            self.cmd_vel_pub.publish(twist)
-            rospy.sleep(0.1)
-            # 如果识别线程已经得到结果，提前停止旋转
-            if self.vision_result_event.is_set():
-                break
-
-        # 停止旋转
-        self._stop_robot()
-        rospy.sleep(0.5)
-
-        # 先标记识别进行中并清除事件，再触发相机，防止竞态导致结果丢失
-        self.recognition_in_progress = True
-        self.vision_result_event.clear()
-
-        # 触发相机拍照
-        rospy.set_param('/top_view_shot_node/im_flag', 1)
-        rospy.loginfo('[Mission] Phase %d: Camera triggered at orientation %d/4',
-                      phase, self.rotation_attempt + 1)
-
-        # 等待识别结果（在 _handle_recognize_task_image 中处理超时）
-        self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
-
     def _handle_search_task_image(self, phase):
+        """导航到视觉读取位置。"""
+        vision_cells = self.field_cfg.get('vision_positions', [5, 37, 45, 77])
+        vision_cell = vision_cells[phase - 1]
+        x, y = get_cell_center_xy(vision_cell, self.field_cfg)
+
         text = self.voice_cfg['voice_text']['task_image_searching'].format(index=phase)
         self._speak(text)
         if self._check_aborted():
             return
-        rospy.loginfo('[Mission] Phase %d: Searching for task image...', phase)
 
-        self.rotation_attempt = 0
-        self._search_rotation(phase)
+        rospy.loginfo('[Mission] Phase %d: Navigating to vision position cell %d (%.3f, %.3f)',
+                      phase, vision_cell, x, y)
+        self._stop_robot()
+        self._send_nav_goal(x, y)
+        self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
 
     def _handle_recognize_task_image(self, phase):
-        timeout = 10.0  # 每个方向等 10 秒
-        detected = self.vision_result_event.wait(timeout=timeout)
+        """等待到达视觉位置 → 触发 VLM → 获取任务区号。"""
+        timeout_s = self.mission_cfg['timeouts'].get('navigation_goal_timeout_s', 60)
+        deadline = time.time() + timeout_s
 
-        # 如果回调线程已处理（低置信度/重复图像），跳过主线程的 rotation 计数
-        if self._vision_handled_by_cb:
-            self._vision_handled_by_cb = False
-            rospy.loginfo('[Mission] Phase %d: Recognition already handled by callback', phase)
-            return
-
-        if not detected or self.recognition_in_progress:
-            rospy.logwarn('[Mission] Phase %d: No recognition at rotation %d/4',
-                          phase, self.rotation_attempt + 1)
-
-            self.rotation_attempt += 1
-            if self.rotation_attempt < 4:
-                # 旋转到下一个方向继续搜索
-                rospy.loginfo('[Mission] Phase %d: Rotating to next direction...', phase)
-                self._search_rotation(phase)
+        # 轮询等待到达视觉位置
+        while time.time() < deadline:
+            if self._check_aborted():
+                self.move_base_client.cancel_goal()
                 return
-            else:
-                # 4 个方向都扫过了，触发重试
-                rospy.logwarn('[Mission] Phase %d: All 4 orientations scanned, retrying...', phase)
+            state = self.move_base_client.get_state()
+            if state == GoalStatus.SUCCEEDED:
+                break
+            if state in (GoalStatus.ABORTED, GoalStatus.REJECTED,
+                         GoalStatus.RECALLED, GoalStatus.PREEMPTED, GoalStatus.LOST):
+                rospy.logwarn('[Mission] Phase %d: Nav to vision failed (state=%d), retrying',
+                              phase, state)
                 self._retry_perception(phase)
                 return
+            rospy.sleep(1.0)
 
-        rospy.loginfo('[Mission] Phase %d: Recognition successful, target cell=%d',
-                      phase, self.target_cell)
-        self.rotation_attempt = 0
+        # 到达视觉位置，触发 mock VLM
+        self._stop_robot()
+        rospy.sleep(0.5)
+        self.recognition_in_progress = True
+        self.vision_result_event.clear()
+        rospy.set_param('/top_view_shot_node/im_flag', 1)
+        rospy.loginfo('[Mission] Phase %d: VLM triggered at vision position', phase)
+
+        # 等待识别结果
+        result_timeout = 10.0
+        detected = self.vision_result_event.wait(timeout=result_timeout)
+
+        if not detected or self.recognition_in_progress:
+            rospy.logwarn('[Mission] Phase %d: No vision result (%.1fs timeout), retrying',
+                          phase, result_timeout)
+            self._retry_perception(phase)
+            return
+
+        rospy.loginfo('[Mission] Phase %d: Target cell=%d', phase, self.target_cell)
         text = self.voice_cfg['voice_text']['task_image_recognized'].format(
             index=phase, target_cell=self.target_cell)
         self._speak(text)
@@ -805,12 +761,10 @@ class MissionStateMachine(object):
         self._speak(text)
         if self._check_aborted():
             return
-        rospy.loginfo('[Mission] Perception retry %d/%d, restarting rotation search',
+        rospy.loginfo('[Mission] Perception retry %d/%d, re-navigating to vision position',
                       self.perception_retry_count, max_retries)
-        self.rotation_attempt = 0
         self.recognition_in_progress = False
         self.vision_result_event.clear()
-        # 回到搜索状态，从第一个方向重新开始
         self.transition(MissionState.task_image_state(phase, 'SEARCH_TASK_IMAGE'))
 
 

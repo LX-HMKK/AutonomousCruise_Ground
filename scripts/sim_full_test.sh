@@ -24,7 +24,7 @@ mkdir -p "$WS"/src/mission_manager/launch "$WS"/config
 cp "$SRC"/src/mission_manager/scripts/*.py "$WS"/src/mission_manager/scripts/
 cp "$SRC"/src/mission_manager/launch/*.launch "$WS"/src/mission_manager/launch/
 cp "$SRC"/config/*.yaml "$WS"/config/
-cp "$SRC"/src/robot_slam/maps/game.* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
+cp "$SRC"/src/robot_slam/maps/competition_field.* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
 
 # 3. 启动
 echo "[3/4] 启动仿真..."

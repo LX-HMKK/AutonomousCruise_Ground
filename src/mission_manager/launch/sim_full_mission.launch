@@ -1,16 +1,14 @@
 <launch>
   <!-- 完整比赛仿真：导航 + VLM + 状态机 + 安全监控 -->
-  <arg name="map_name" default="game"/>
-  <arg name="task_sequence" default="[41, 33, 50, 31]"/>
+  <arg name="map_name" default="competition_field"/>
 
   <!-- 1. 仿真环境 (map + robot + AMCL + move_base) -->
   <include file="$(find mission_manager)/launch/sim_navigation.launch">
     <arg name="map_name" value="$(arg map_name)"/>
   </include>
 
-  <!-- 2. Mock VLM (仿真图像识别) -->
+  <!-- 2. Mock VLM (从 competition_field.yaml 读取 vision→task 映射) -->
   <node pkg="mission_manager" type="mock_vlm.py" name="mock_vlm" output="screen">
-    <param name="task_sequence" value="$(arg task_sequence)"/>
     <param name="confidence" value="0.85"/>
   </node>
 

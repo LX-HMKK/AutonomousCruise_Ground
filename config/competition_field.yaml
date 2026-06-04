@@ -23,16 +23,34 @@ cell_index_convention:
 start_cells: [1, 81]
 finish_cell: 9
 
+# 9 个候选任务区 (中央 3×3 区域)
 task_cells: [31, 32, 33, 40, 41, 42, 49, 50, 51]
+
+# 4 个视觉读取位置 (围栏内侧贴任务信息图像)
+vision_positions: [5, 37, 45, 77]
+
+# 视觉位置 → 任务区映射 (仿真用, 实车由 VLM 识别)
+vision_to_task:
+  5: 41
+  37: 33
+  45: 50
+  77: 31
 
 task_region:
   size_m: [0.38, 0.32]
   description: "任务点区域 38cm x 32cm，在对应黄色格子中居中"
 
+# 内部 8×8 区域随机挡板 (仿真用于测试避障)
+# 格子编号 10-72 (不含最外圈 1-9, 73-81 和中圈 10-17, 26, 35, 44, 53, 62, 71)
 obstacles:
+  # - cell: 19
+  # - cell: 28
+  # - cell: 58
+  # - cell: 67
+
+obstacles_config:
   board_size_m: [0.40, 0.30]
-  placement: "random_on_red_lines_in_rule_diagram"
-  detection_required: true
+  description: "挡板 40cm x 30cm，随机放置在红色线路上，可在此添加 cell 编号启用"
 
 task_images:
   count: 4
