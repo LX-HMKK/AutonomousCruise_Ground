@@ -24,7 +24,7 @@ DWAPlannerROS:
   acc_lim_y: 2.5
 
   # ---- 到达判定 (目标点附近抽搐重点关注这里) ----
-  xy_goal_tolerance: 0.03   # 位置到达容差(m), 太小则永远到不了, 太大则不精准
+  xy_goal_tolerance: 0.05   # 位置到达容差(m), 太小则永远到不了, 太大则不精准
   yaw_goal_tolerance: 0.02  # 朝向到达容差(rad), 0.02≈1.1°
   latch_xy_goal_tolerance: false  # true=到达位置后不再修正, 仅旋转对齐
 
