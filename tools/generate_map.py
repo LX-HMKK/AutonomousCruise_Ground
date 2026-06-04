@@ -49,8 +49,8 @@ def generate_map(config_path, output_name):
 
     def world_to_pixel(mx, my):
         """map 坐标 → 像素坐标 (左上角原点, Y向下)"""
-        px = int((mx - origin_x) / resolution)
-        py = int(img_h - (my - origin_y) / resolution)
+        px = int(round((mx - origin_x) / resolution))
+        py = int(round(img_h - (my - origin_y) / resolution))
         return px, py
 
     # ---- 围栏 (黑色边框) ----
