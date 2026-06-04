@@ -18,7 +18,7 @@ timeouts:
   no_state_change_s: 40            # 单状态最长停留时间 (导航+识别可能较长)
   perception_retry_limit: 3        # 识别失败最大重试次数
   navigation_retry_limit: 2        # 导航失败最大重试次数
-  navigation_goal_timeout_s: 60    # 单次导航超时
+  navigation_goal_timeout_s: 30    # 单次导航超时
   nav_stuck_timeout_s: 10.0        # 导航卡死检测 (位移<2cm且yaw变化<0.05rad)
 
 # ---- 等待时长 (全部可调) ----

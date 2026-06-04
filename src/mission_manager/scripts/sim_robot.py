@@ -23,7 +23,7 @@ import math
 import yaml
 import tf
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, JointState
 from geometry_msgs.msg import Twist, Quaternion, TransformStamped
 try:
     from visualization_msgs.msg import Marker, MarkerArray
@@ -114,6 +114,7 @@ class SimRobot(object):
         # 发布
         self.odom_pub = rospy.Publisher('/odom', Odometry, queue_size=10)
         self.scan_pub = rospy.Publisher('/scan_filtered', LaserScan, queue_size=10)
+        self.joint_pub = rospy.Publisher('/joint_states', JointState, queue_size=10)
         if HAS_MARKER:
             self.obs_marker_pub = rospy.Publisher('/sim_obstacles', MarkerArray, queue_size=10)
             self._publish_obstacle_markers()
@@ -259,28 +260,6 @@ class SimRobot(object):
         t.transform.rotation = Quaternion(*q)
         self.tf_br.sendTransformMessage(t)
 
-        # base_footprint → base_link (代替 robot_state_publisher, 消除外部 TF 依赖)
-        t_bl = TransformStamped()
-        t_bl.header.stamp = now
-        t_bl.header.frame_id = 'base_footprint'
-        t_bl.child_frame_id = 'base_link'
-        t_bl.transform.translation.x = 0.0
-        t_bl.transform.translation.y = 0.0
-        t_bl.transform.translation.z = 0.0
-        t_bl.transform.rotation = Quaternion(0, 0, 0, 1)
-        self.tf_br.sendTransformMessage(t_bl)
-
-        # base_link → laser_link (costmap 观测需要)
-        t_laser = TransformStamped()
-        t_laser.header.stamp = now
-        t_laser.header.frame_id = 'base_link'
-        t_laser.child_frame_id = 'laser_link'
-        t_laser.transform.translation.x = 0.0
-        t_laser.transform.translation.y = 0.0
-        t_laser.transform.translation.z = 0.0
-        t_laser.transform.rotation = Quaternion(0, 0, 0, 1)
-        self.tf_br.sendTransformMessage(t_laser)
-
     def run(self):
         rate = rospy.Rate(20)
         tick = 0
@@ -288,10 +267,21 @@ class SimRobot(object):
             self._publish_odom()
             self._publish_scan()
             self._publish_tf()
+            # 每1s发joint_states, 驱动robot_state_publisher维持TF树
+            if tick % 20 == 0:
+                self._publish_joint_states()
             tick += 1
             if HAS_MARKER and tick % 10 == 0:
                 self._publish_obstacle_markers()
             rate.sleep()
+
+    def _publish_joint_states(self):
+        js = JointState()
+        js.header.stamp = rospy.Time.now()
+        js.name = []
+        js.position = []
+        js.velocity = []
+        self.joint_pub.publish(js)
 
 
 if __name__ == '__main__':
