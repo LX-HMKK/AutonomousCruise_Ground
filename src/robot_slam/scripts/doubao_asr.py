@@ -18,7 +18,7 @@ import requests
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import DOUBAO_KEY
+from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN
 
 # ---- ASR 配置 ----
 ASR_RESOURCE_ID = "volc.seedasr.auc"   # 豆包语音识别模型 2.0
@@ -56,7 +56,8 @@ class DoubaoASR(object):
 
     def __init__(self):
         self.start_pub = rospy.Publisher('/start', String, queue_size=10)
-        self.api_key = DOUBAO_KEY
+        self.appid = SPEECH_APPID
+        self.token = SPEECH_TOKEN
         rospy.loginfo('[DoubaoASR] Ready. Resource=%s  Waiting for "开始比赛"...',
                       ASR_RESOURCE_ID)
 
@@ -86,18 +87,26 @@ class DoubaoASR(object):
 
     def _recognize(self, audio_path):
         """调用豆包语音识别 HTTP API。"""
-        if not self.api_key:
+        if not self.token:
             rospy.logerr('[DoubaoASR] API key not set')
             return None
         try:
             with open(audio_path, 'rb') as f:
                 audio_data = f.read()
             headers = {
-                'Authorization': 'Bearer; ' + self.api_key,
+                'Authorization': 'Bearer; ' + self.token,
                 'Resource-Id': ASR_RESOURCE_ID,
-                'Content-Type': 'audio/wav; codec=pcm; rate=%d' % SAMPLE_RATE,
+                'Content-Type': 'application/json',
             }
-            resp = requests.post(ASR_API_URL, headers=headers, data=audio_data, timeout=10)
+            import base64, uuid as _uuid
+            body = {
+                'appid': self.appid,
+                'reqid': str(_uuid.uuid4()),
+                'audio': base64.b64encode(audio_data).decode('utf-8'),
+                'audio_format': 'wav',
+                'sample_rate': SAMPLE_RATE,
+            }
+            resp = requests.post(ASR_API_URL, headers=headers, json=body, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 # 火山引擎 ASR 返回格式: {"result": [{"text": "..."}]}

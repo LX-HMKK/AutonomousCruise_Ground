@@ -14,13 +14,12 @@ import requests
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import DOUBAO_KEY
+from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN
 
 # ---- TTS 配置 ----
 TTS_RESOURCE_ID = "volc.tts_async.default"  # 豆包语音合成 (长文本)
 TTS_API_URL = "https://openspeech.bytedance.com/api/v1/tts_async/submit"
 TTS_QUERY_URL = "https://openspeech.bytedance.com/api/v1/tts_async/query"
-TTS_APPID = "594a7b46"  # 与 iFlyTek 备份中相同
 
 
 class DoubaoTTS(object):
@@ -29,7 +28,8 @@ class DoubaoTTS(object):
     def __init__(self):
         self.tts_done_pub = rospy.Publisher('/tts_done', String, queue_size=10)
         rospy.Subscriber('/voiceWords', String, self._on_voice)
-        self.api_key = DOUBAO_KEY
+        self.appid = SPEECH_APPID
+        self.token = SPEECH_TOKEN
         rospy.loginfo('[DoubaoTTS] Ready. resource=%s', TTS_RESOURCE_ID)
 
     def _on_voice(self, msg):
@@ -38,7 +38,7 @@ class DoubaoTTS(object):
             return
         rospy.loginfo('[DoubaoTTS] Speaking: %s', text[:50])
 
-        if self.api_key:
+        if self.token:
             try:
                 self._speak_async(text)
             except Exception as e:
@@ -51,20 +51,19 @@ class DoubaoTTS(object):
 
     def _speak_async(self, text):
         """提交异步 TTS 任务 → 轮询 → 下载 → mplayer 播放。"""
+        import uuid as _uuid
         headers = {
-            'Authorization': 'Bearer; ' + self.api_key,
+            'Authorization': 'Bearer; ' + self.token,
             'Resource-Id': TTS_RESOURCE_ID,
             'Content-Type': 'application/json',
         }
-        # 提交合成任务
         body = {
-            'appid': TTS_APPID,
+            'appid': self.appid,
+            'reqid': str(_uuid.uuid4()),
             'text': text,
-            'speaker': 'zh_female_qingxin',
-            'audio_params': {
-                'format': 'mp3',
-                'sample_rate': 16000,
-            },
+            'format': 'mp3',
+            'voice_type': 'BV701_streaming',
+            'sample_rate': 24000,
         }
         resp = requests.post(TTS_API_URL, headers=headers, json=body, timeout=10)
         if resp.status_code != 200:
@@ -79,7 +78,7 @@ class DoubaoTTS(object):
             time.sleep(0.3)
             qresp = requests.get(TTS_QUERY_URL,
                                  headers=headers,
-                                 params={'appid': TTS_APPID, 'task_id': task_id},
+                                 params={'appid': self.appid, 'task_id': task_id},
                                  timeout=5)
             if qresp.status_code == 200:
                 qdata = qresp.json()
