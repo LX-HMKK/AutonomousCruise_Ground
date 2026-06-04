@@ -2,9 +2,16 @@
 
   <arg name="use_map_topic" default="false"/>
   <arg name="scan_topic" default="scan_filtered"/>
+  <arg name="initial_pose_x" default="0.0"/>
+  <arg name="initial_pose_y" default="0.0"/>
+  <arg name="initial_pose_a" default="0.0"/>
 
   <node pkg="amcl" type="amcl" name="amcl" clear_params="true">
     <param name="use_map_topic" value="$(arg use_map_topic)"/>
+    <!-- 初始位姿: 仿真侧会传入正确起点, 实车默认(0,0)随后由 /initialpose 修正 -->
+    <param name="initial_pose_x" value="$(arg initial_pose_x)"/>
+    <param name="initial_pose_y" value="$(arg initial_pose_y)"/>
+    <param name="initial_pose_a" value="$(arg initial_pose_a)"/>
     <!-- Publish scans from best pose at a max of 10 Hz -->
     <param name="odom_model_type" value="omni"/>
     <param name="odom_alpha5" value="0.1"/>

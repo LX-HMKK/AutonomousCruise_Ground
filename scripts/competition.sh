@@ -6,7 +6,7 @@
 # 节点列表 (14个):
 #   roscore + abot_driver + abot_imu + rplidar
 #   + box_filter + robot_state_publisher + robot_pose_ekf
-#   + map_server + cartographer_node + amcl(备)
+#   + map_server + amcl
 #   + move_base + game_node(Snowboy唤醒)
 #   + vlm_node(豆包VLM) + mission_state_machine + safety_monitor
 #
@@ -49,9 +49,9 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
     roslaunch abot_bringup robot_with_imu.launch &
     sleep 5
 
-    # 2. 导航层 (4 个节点: map_server + cartographer + move_base)
+    # 2. 导航层 (4 个节点: map_server + AMCL + move_base)
     echo "[2/5] 启动导航栈..."
-    roslaunch robot_slam nav_cartographer.launch map_name:=${MAP_NAME} &
+    roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} &
     sleep 8
 
     # 3. 唤醒词检测 (1 个节点)
@@ -76,7 +76,7 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
     echo "节点清单:"
     echo "  [底层] abot_driver, abot_imu, rplidar, box_filter"
     echo "  [融合] robot_state_publisher, robot_pose_ekf"
-    echo "  [定位] map_server, cartographer_node, amcl(备)"
+    echo "  [定位] map_server, amcl"
     echo "  [导航] move_base (GlobalPlanner + DWA)"
     echo "  [语音] game_node (Snowboy)"
     echo "  [视觉] vlm_node (豆包 Vision Pro)"
@@ -108,12 +108,12 @@ else
         exec bash" &
     sleep 2
 
-    # 窗口 3: 导航栈 (map_server + cartographer + move_base)
+    # 窗口 3: 导航栈 (map_server + AMCL + move_base)
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
         sleep 6
-        roslaunch robot_slam nav_cartographer.launch map_name:=${MAP_NAME}
+        roslaunch robot_slam navigation.launch map_name:=${MAP_NAME}
         exec bash" &
     sleep 2
 
@@ -150,7 +150,7 @@ else
     echo "========================================"
     echo "窗1: roscore"
     echo "窗2: 底盘驱动 (abot_driver + IMU + LiDAR + EKF)"
-    echo "窗3: 导航栈 (map_server + Cartographer + move_base)"
+    echo "窗3: 导航栈 (map_server + AMCL + move_base)"
     echo "窗4: 唤醒词 + VLM 视觉"
     echo "窗5: 任务状态机 + 安全监控"
     echo "窗6: RViz 可视化"

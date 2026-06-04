@@ -3,7 +3,7 @@
 
 mission:
   map_name: competition_field      # 地图名 (competition_field / game / my_lab)
-  max_time_s: 180                  # 比赛总时长上限
+  max_time_s: 200                  # 比赛总时长上限 (仿真围墙增加绕行, 需 200s)
   required_task_image_count: 4     # 需要完成的任务图像数量
   require_start_voice: true        # 是否需要开始语音
   require_finish_voice: true       # 是否需要结束语音

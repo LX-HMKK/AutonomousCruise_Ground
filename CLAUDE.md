@@ -249,6 +249,23 @@ safety_monitor ──/safety_status──→ mission_state_machine
 - **日志优先**：每次识别、导航、播报结果必须记录，方便赛前复盘和问题调试。
 - **最小侵入修改**：不进行大规模重构，优先做最小可验证修改。不引入非必要大型依赖。
 
+### 提交前必须验证
+
+**每次修改仿真相关代码后，必须在 WSL 中运行完整仿真测试，自己验收通过才能提交：**
+
+```bash
+wsl bash /mnt/d/StudyWorks/3.2/MachineVision_Project/AutonomousCruise_Ground/scripts/sim_full_test.sh
+```
+
+验收标准：日志中出现 `DONE`（4 个任务全部完成，导航到终点），无新增 `ERROR`。
+
+**绝对禁止的行为：**
+- 禁止写假代码凑数（无实际功能的占位代码、永远不会执行的分支）
+- 禁止未经 WSL 实跑验证就声称"修好了"
+- 禁止反复在同一问题上打补丁而不追根因
+- 禁止修改实车共享文件（`amcl.launch.xml`、`navigation.launch`、`costmap_common_params.yaml` 等）而不评估对实车链路的影响
+- 禁止提交未经仿真验证的 AMCL/导航/定位相关改动
+
 ### 比赛关键约束
 
 | 约束 | 值 |

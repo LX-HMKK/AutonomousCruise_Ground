@@ -407,11 +407,19 @@ class MissionStateMachine(object):
         vinfo = v2t.get(vision_cell, {})
         if isinstance(vinfo, dict):
             yaw = vinfo.get('yaw_rad', 0.0)
+            offset_m = vinfo.get('offset_m', 0.0)
         else:
             yaw = 0.0  # 兼容旧格式 (纯数字)
+            offset_m = 0.0
 
-        rospy.loginfo('[Mission] Phase %d: Navigating to vision position cell %d (%.3f, %.3f, yaw=%.2f)',
-                      phase, vision_cell, x, y, yaw)
+        # 向远离围墙方向退后 offset_m (避免车体碰撞墙角)
+        if offset_m > 0:
+            x -= offset_m * math.cos(yaw)
+            y -= offset_m * math.sin(yaw)
+
+        rospy.loginfo('[Mission] Phase %d: Navigating to vision position cell %d (%.3f, %.3f, yaw=%.2f)%s',
+                      phase, vision_cell, x, y, yaw,
+                      (' offset=%.2fm' % offset_m) if offset_m > 0 else '')
         self._stop_robot()
         self._send_nav_goal(x, y, yaw)
         self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
@@ -648,7 +656,14 @@ class MissionStateMachine(object):
     def _handle_navigate_to_finish(self):
         finish_cell = self.field_cfg['finish_cell']
         x, y = get_cell_center_xy(finish_cell, self.field_cfg)
-        rospy.loginfo('[Mission] Navigating to finish cell %d (%.3f, %.3f)', finish_cell, x, y)
+        # 终点墙角偏移: 向场地中心方向退后，避免车体碰撞围墙
+        offset = self.field_cfg.get('finish_offset_m', 0.0)
+        if offset > 0:
+            x -= offset * (1 if x > 0 else -1) if abs(x) > 0.01 else 0
+            y -= offset * (1 if y > 0 else -1) if abs(y) > 0.01 else 0
+        rospy.loginfo('[Mission] Navigating to finish cell %d (%.3f, %.3f)%s',
+                      finish_cell, x, y,
+                      (' offset=%.2fm' % offset) if offset > 0 else '')
 
         text = self.voice_cfg['voice_text']['navigating_to_finish']
         self._speak(text)

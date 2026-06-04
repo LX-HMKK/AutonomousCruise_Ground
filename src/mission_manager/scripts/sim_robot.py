@@ -1,14 +1,21 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""仿真机器人节点：发布 mock odometry、laser scan、TF，替代真实硬件。
+"""仿真机器人节点：发布带噪声的 mock odometry、laser scan、TF，替代真实硬件。
 
 使用方法:
   rosrun mission_manager sim_robot.py _init_x:=-1.6 _init_y:=1.6
 
 发布的 Topic:
-  /odom            (nav_msgs/Odometry)
-  /scan_filtered   (sensor_msgs/LaserScan) — 含动态障碍物
-  TF: odom -> base_footprint, map -> odom
+  /odom            (nav_msgs/Odometry, 含噪声)
+  /scan_filtered   (sensor_msgs/LaserScan, 含噪声 + 动态障碍物)
+  /joint_states    (sensor_msgs/JointState)
+  /initialpose     (geometry_msgs/PoseWithCovarianceStamped, 给 AMCL 初始化)
+  TF: odom -> base_footprint (含噪声里程计, map->odom 由 AMCL 发布)
+
+噪声参数 (仿真 AMCL 定位):
+  ~odom_noise_linear  里程计线位移噪声系数 (默认 0.1, noise=系数×每步位移)
+  ~odom_noise_angular 里程计角位移噪声系数 (默认 0.1)
+  ~laser_noise_std    激光测距高斯噪声 (m, 默认 0.01)
 
 障碍物:
   从 competition_field.yaml 的 obstacles 字段读取 cell 编号,
@@ -20,11 +27,12 @@ reload(sys)
 sys.setdefaultencoding('utf-8')
 import rospy
 import math
+import random
 import yaml
 import tf
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan, JointState
-from geometry_msgs.msg import Twist, Quaternion, TransformStamped
+from geometry_msgs.msg import Twist, Quaternion, TransformStamped, PoseWithCovarianceStamped
 try:
     from visualization_msgs.msg import Marker, MarkerArray
     HAS_MARKER = True
@@ -111,6 +119,14 @@ class SimRobot(object):
         self.y = init_y
         self.yaw = init_yaw
 
+        # 传感器噪声参数 (仿真 AMCL 定位)
+        # noise = coefficient * distance_per_step + floor
+        # 例: 0.1 × 0.01m = 0.001m/step → 100步(1m)累积 ≈ 1cm RMS
+        self.odom_noise_linear = rospy.get_param('~odom_noise_linear', 0.1)    # 线位移噪声系数
+        self.odom_noise_angular = rospy.get_param('~odom_noise_angular', 0.1)  # 角位移噪声系数
+        # 激光噪声: RPLidar A1 典型 ~1cm @ 1m
+        self.laser_noise_std = rospy.get_param('~laser_noise_std', 0.01)        # m
+
         # 加载障碍物 — 放在内圈网格边上，建模为线段
         self.obstacle_segments = []
         try:
@@ -138,6 +154,17 @@ class SimRobot(object):
             rospy.logwarn('[SimRobot] Obstacle load failed: %s', e)
             self.obstacle_segments = []
 
+        # 场地四周围栏 (AMCL 匹配静态地图必须)
+        field_w = 3.6
+        half_f = field_w / 2.0
+        wall_thickness = 0.01
+        self.obstacle_segments.extend([
+            (-half_f,  half_f,  half_f,  half_f,  0.0,  half_f,  field_w, wall_thickness),   # 北
+            (-half_f, -half_f,  half_f, -half_f,  0.0, -half_f,  field_w, wall_thickness),   # 南
+            ( half_f, -half_f,  half_f,  half_f,  half_f,  0.0,  field_w, wall_thickness),   # 东
+            (-half_f, -half_f, -half_f,  half_f, -half_f,  0.0,  field_w, wall_thickness),   # 西
+        ])
+
         # 发布
         self.odom_pub = rospy.Publisher('/odom', Odometry, queue_size=10)
         self.scan_pub = rospy.Publisher('/scan_filtered', LaserScan, queue_size=10)
@@ -151,8 +178,34 @@ class SimRobot(object):
         rospy.Subscriber('/cmd_vel', Twist, self._on_cmd_vel)
         self.last_time = rospy.Time.now()
 
+        # 发布初始位姿给 AMCL, 避免粒子滤波器冷启动发散
+        self._publish_initial_pose()
+
         rospy.loginfo('[SimRobot] Init at (%.2f, %.2f, %.2f)  obstacles=%d',
                       self.x, self.y, self.yaw, len(self.obstacle_segments))
+
+    def _publish_initial_pose(self):
+        """发布初始位姿到 /initialpose (latch)，AMCL 随时订阅都能收到。
+        只发一次 — 重复发布会导致 AMCL 反复重置粒子滤波器无法收敛。"""
+        ip = PoseWithCovarianceStamped()
+        ip.header.frame_id = 'map'
+        ip.header.stamp = rospy.Time.now()
+        ip.pose.pose.position.x = self.x
+        ip.pose.pose.position.y = self.y
+        q = tf.transformations.quaternion_from_euler(0, 0, self.yaw)
+        ip.pose.pose.orientation = Quaternion(*q)
+        # 3×3 对角协方差 (x, y, yaw) — 仿真初始位姿为真值，小协方差
+        ip.pose.covariance = [0.01, 0, 0, 0, 0, 0,
+                              0, 0.01, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0, 0.01]
+        # latch=True: AMCL 即使晚启动也能在订阅时收到最后一条
+        pub = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=1, latch=True)
+        pub.publish(ip)
+        rospy.loginfo('[SimRobot] Initial pose sent to AMCL (%.2f, %.2f, %.2f)',
+                      self.x, self.y, self.yaw)
 
     def _on_cmd_vel(self, msg):
         now = rospy.Time.now()
@@ -161,11 +214,20 @@ class SimRobot(object):
             dt = 0.05
         self.last_time = now
 
+        # 全向轮运动学积分
+        linear_dist = math.sqrt(msg.linear.x**2 + msg.linear.y**2) * dt
+        angular_dist = abs(msg.angular.z) * dt
+
         self.x += msg.linear.x * math.cos(self.yaw) * dt
         self.y += msg.linear.x * math.sin(self.yaw) * dt
         self.x -= msg.linear.y * math.sin(self.yaw) * dt
         self.y += msg.linear.y * math.cos(self.yaw) * dt
         self.yaw += msg.angular.z * dt
+
+        # 叠加高斯噪声模拟轮滑/地面不平整 (噪声与位移成正比)
+        self.x += random.gauss(0, self.odom_noise_linear * linear_dist + 0.0001)
+        self.y += random.gauss(0, self.odom_noise_linear * linear_dist + 0.0001)
+        self.yaw += random.gauss(0, self.odom_noise_angular * angular_dist + 0.00005)
 
     def _publish_odom(self):
         msg = Odometry()
@@ -229,6 +291,12 @@ class SimRobot(object):
                     if t < ranges[i]:
                         ranges[i] = t
 
+        # 叠加高斯噪声模拟 LiDAR 测距抖动
+        if self.laser_noise_std > 0:
+            for i in range(num_readings):
+                ranges[i] = max(msg.range_min, min(msg.range_max,
+                    ranges[i] + random.gauss(0, self.laser_noise_std)))
+
         msg.ranges = ranges
         msg.intensities = [0.0] * num_readings
         self.scan_pub.publish(msg)
@@ -267,6 +335,8 @@ class SimRobot(object):
         now = rospy.Time.now()
         q = tf.transformations.quaternion_from_euler(0, 0, self.yaw)
 
+        # map→odom sim_robot 始终发布 identity (仿真 ground truth)
+        # AMCL 同时运行发布自己的 map→odom 估计, tf 树自动选用更新时间更近的
         t_map = TransformStamped()
         t_map.header.stamp = now
         t_map.header.frame_id = 'map'
@@ -274,9 +344,10 @@ class SimRobot(object):
         t_map.transform.translation.x = 0.0
         t_map.transform.translation.y = 0.0
         t_map.transform.translation.z = 0.0
-        t_map.transform.rotation = Quaternion(0, 0, 0, 1)
+        t_map.transform.rotation = Quaternion(0.0, 0.0, 0.0, 1.0)
         self.tf_br.sendTransformMessage(t_map)
 
+        # odom→base_footprint (含噪声)
         t = TransformStamped()
         t.header.stamp = now
         t.header.frame_id = 'odom'

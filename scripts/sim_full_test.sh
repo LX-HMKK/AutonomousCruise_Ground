@@ -23,21 +23,22 @@ echo "[1/4] 清理旧进程..."
 killall -9 rosmaster rosout roscore roslaunch rviz 2>/dev/null || true
 sleep 2
 
-# 2. 同步 (Windows 源码 → WSL 工作空间)
+# 2. 同步 (Windows 源码 → WSL 工作空间) — 递归覆盖，新增目录/文件自动包含
 echo "[2/4] 同步源码..."
-mkdir -p "$WS"/src/mission_manager/launch "$WS"/src/mission_manager/scripts \
-         "$WS"/src/common/scripts "$WS"/config "$WS"/src/robot_slam/maps \
-         "$WS"/src/robot_slam/params/carto "$WS"/src/robot_slam/rviz
-
-cp "$SRC"/src/mission_manager/scripts/*.py "$WS"/src/mission_manager/scripts/
-cp "$SRC"/src/mission_manager/launch/*.launch "$WS"/src/mission_manager/launch/
-cp "$SRC"/src/common/scripts/*.py "$WS"/src/common/scripts/
-cp "$SRC"/config/*.yaml "$WS"/config/
-cp "$SRC"/src/robot_slam/params/carto/*.yaml "$WS"/src/robot_slam/params/carto/
-cp "$SRC"/src/robot_slam/rviz/*.rviz "$WS"/src/robot_slam/rviz/
-cp "$SRC"/src/robot_slam/maps/"$MAP_NAME".* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
-# 修复 Windows CRLF: 内核无法解析 #!/usr/bin/env python␍ → No such file or directory
-sed -i 's/\r$//' "$WS"/src/mission_manager/scripts/*.py "$WS"/src/common/scripts/*.py 2>/dev/null || true
+# 清理源+目标的 .pyc / __pycache__ (避免 cp 权限和 CRLF 校验错误)
+find "$SRC"/src/ "$SRC"/config/ "$WS"/src/ "$WS"/config/ \
+    \( -name '*.pyc' -o -name '__pycache__' \) -exec rm -rf {} + 2>/dev/null || true
+# 递归同步
+cp -r "$SRC"/src/mission_manager/. "$WS"/src/mission_manager/ 2>/dev/null || true
+cp -r "$SRC"/src/common/.          "$WS"/src/common/           2>/dev/null || true
+cp -r "$SRC"/config/.              "$WS"/config/               2>/dev/null || true
+cp -r "$SRC"/src/robot_slam/.      "$WS"/src/robot_slam/       2>/dev/null || true
+# CRLF → LF: 所有文本文件去 \r (Windows git → Linux 内核/roslaunch)
+find "$WS"/src/ "$WS"/config/ -type f \
+    \( -name '*.py' -o -name '*.launch' -o -name '*.xml' -o -name '*.yaml' \
+       -o -name '*.rviz' -o -name '*.sh' -o -name '*.lua' -o -name '*.urdf' \
+       -o -name '*.cfg' -o -name '*.md' \) \
+    -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 echo "  地图: $MAP_NAME  ($(head -1 "$WS"/src/robot_slam/maps/"$MAP_NAME".yaml 2>/dev/null || echo 'MISSING!'))"
 
 # 3. 启动
