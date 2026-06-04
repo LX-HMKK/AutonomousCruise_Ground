@@ -1,6 +1,7 @@
 #!/bin/bash
 # WSL 完整比赛仿真测试
-set -euo pipefail
+set -eu
+set -o pipefail
 
 WS="$HOME/abot_ws"
 LOG="/tmp/sim_full.log"
