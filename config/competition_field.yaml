@@ -17,8 +17,8 @@ cell_index_convention:
     网格编号 N 对应的 map 坐标：
       row = (N - 1) // 9   (0 为最北行)
       col = (N - 1) % 9    (0 为最西列)
-      x = (col - 4) * 0.4 + 0.2
-      y = (4 - row) * 0.4 - 0.2
+      x = (col - 4) * 0.4
+      y = (4 - row) * 0.4
 
 start_cells: [1, 81]
 finish_cell: 9
@@ -41,9 +41,9 @@ task_region:
   size_m: [0.38, 0.32]
   description: "任务点区域 38cm x 32cm，在对应黄色格子中居中"
 
-# 网格线上的挡板 (仿真避障测试, 避开任务区 31-33/40-42/49-51)
+# 指定格子内的挡板 (仿真避障测试, 避开任务区 31-33/40-42/49-51)
 # cell: 参照格子  edge: 格子的哪条边 (N=北 S=南 E=东 W=西)
-# 挡板居中放在边上, 朝向自动对齐边 (yaw_deg 可覆盖)
+# 挡板贴近该边但中心保持在 cell 内部, 朝向自动对齐边 (yaw_deg 可覆盖)
 obstacles:
   - { cell: 19, edge: S }   # 水平挡板
   - { cell: 22, edge: E }   # 竖直挡板
@@ -53,7 +53,7 @@ obstacles:
 
 obstacles_config:
   board_size_m: [0.01, 0.4]
-  description: "挡板 40cm x 30cm，随机放置在红色线路上，可在此添加 cell 编号启用"
+  description: "仿真挡板厚 1cm、长 40cm；edge 表示贴近指定格子的哪条边"
 
 task_images:
   count: 4

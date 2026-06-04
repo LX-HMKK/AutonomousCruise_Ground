@@ -6,9 +6,11 @@ WS="$HOME/abot_ws"
 LOG="/tmp/sim_full.log"
 SRC="/mnt/d/StudyWorks/3.2/MachineVision_Project/AutonomousCruise_Ground"
 
-# 一次 source，全程复用（不重复 source 避免覆盖 ROS_MASTER_URI）
+# ROS setup 脚本会读取未定义变量，source 时临时关闭 nounset。
+set +u
 source /opt/ros/melodic/setup.bash
 source "$WS"/devel/setup.bash
+set -u
 
 # 从 mission.yaml 读取地图名
 MAP_NAME=$(python -c "import yaml; print(yaml.safe_load(open('$SRC/config/mission.yaml'))['mission']['map_name'])" 2>/dev/null || echo "competition_field")
@@ -23,12 +25,15 @@ sleep 2
 # 2. 同步 (Windows 源码 → WSL 工作空间)
 echo "[2/4] 同步源码..."
 mkdir -p "$WS"/src/mission_manager/launch "$WS"/src/mission_manager/scripts \
-         "$WS"/src/common/scripts "$WS"/config "$WS"/src/robot_slam/maps
+         "$WS"/src/common/scripts "$WS"/config "$WS"/src/robot_slam/maps \
+         "$WS"/src/robot_slam/params/carto "$WS"/src/robot_slam/rviz
 
 cp "$SRC"/src/mission_manager/scripts/*.py "$WS"/src/mission_manager/scripts/
 cp "$SRC"/src/mission_manager/launch/*.launch "$WS"/src/mission_manager/launch/
 cp "$SRC"/src/common/scripts/*.py "$WS"/src/common/scripts/
 cp "$SRC"/config/*.yaml "$WS"/config/
+cp "$SRC"/src/robot_slam/params/carto/*.yaml "$WS"/src/robot_slam/params/carto/
+cp "$SRC"/src/robot_slam/rviz/*.rviz "$WS"/src/robot_slam/rviz/
 cp "$SRC"/src/robot_slam/maps/"$MAP_NAME".* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
 echo "  地图: $MAP_NAME  ($(head -1 "$WS"/src/robot_slam/maps/"$MAP_NAME".yaml 2>/dev/null || echo 'MISSING!'))"
 

@@ -41,7 +41,7 @@
 ```
 .
 ├── config/                              # 比赛参数配置（禁止硬编码）
-│   ├── competition_field.yaml           # 场地/网格/起终点/任务点/视觉点/障碍物(edge格式)
+│   ├── competition_field.yaml           # 场地/网格/起终点/任务点/视觉点/障碍物(cell+edge格式)
 │   ├── mission.yaml                     # 超时/重试/置信度/地图名/等待时长
 │   ├── robot.yaml                       # 机器人 footprint、传感器参数
 │   ├── navigation.yaml                  # costmap、DWA、规划器参数（参考）
@@ -75,6 +75,8 @@
 | `scripts/mock_vlm.py` | Mock VLM：从 `competition_field.yaml` 读取 `vision_to_task` 映射，按序返回目标任务区号 |
 | `scripts/mock_tts.py` | Mock TTS：订阅 `/voiceWords`，按字数估算时长后发布 `/tts_done` |
 | `scripts/sim_robot.py` | 仿真机器人：odom + scan(含线段障碍物射线追踪) + 完整TF链(map→base_footprint→base_link→laser_link) + joint_states心跳 + 障碍物MarkerArray可视化 |
+
+RViz 中默认显示全局地图、全局代价地图、local plan、cost cloud 和仿真挡板。`Local Costmap` 是随机器人移动的 3m rolling window，会伸出 3.6m 场地；raw 配色下未知区域会显示为黑色，因此默认关闭，需要调试局部代价地图时再手动启用。
 
 #### common（新建，Python）
 公共工具包，提供配置加载、日志、坐标变换。
@@ -163,11 +165,11 @@ roslaunch mission_manager sim_full_mission.launch map_name:=competition_field
 ### 障碍物配置
 
 ```yaml
-# competition_field.yaml — edge 格式, 挡板居中放在网格线上
+# competition_field.yaml — cell+edge 格式, 挡板贴近指定边但保持在该 cell 内
 obstacles:
   - { cell: 19, edge: S }   # 19号南边, 水平挡板
   - { cell: 22, edge: E }   # 22号东边, 竖直挡板
-  # edge: N/S/E/W, 自动对齐边方向, yaw_deg 可覆盖
+  # edge: N/S/E/W, 自动对齐边方向, marker 中心不会偏出 cell, yaw_deg 可覆盖
 ```
 
 ## 开发进度

@@ -56,6 +56,16 @@ def _cell_to_xy(cell, rows=9, cols=9, cell_sz=0.4, field_sz=3.6):
     return x, y
 
 
+def _board_dimensions(cfg):
+    """返回挡板可视化/碰撞线段的 (length, thickness)。"""
+    size = cfg.get('obstacles_config', {}).get('board_size_m', [0.01, 0.40])
+    if not isinstance(size, list) or len(size) < 2:
+        size = [0.01, 0.40]
+    thickness = min(float(size[0]), float(size[1]))
+    length = max(float(size[0]), float(size[1]))
+    return length, thickness
+
+
 class SimRobot(object):
     """仿真机器人：响应 /cmd_vel 更新位姿，发布 odom + laser(含障碍物) + TF。"""
 
@@ -68,7 +78,7 @@ class SimRobot(object):
         self.y = init_y
         self.yaw = init_yaw
 
-        # 加载障碍物 — 放在格子边上(网格线), 建模为线段
+        # 加载障碍物 — 放在配置 cell 内靠指定边的位置，建模为线段
         self.obstacle_segments = []
         try:
             config_path = _find_config('competition_field.yaml')
@@ -78,24 +88,25 @@ class SimRobot(object):
                 field = cfg['field']
                 rows, cols = field['grid_rows'], field['grid_cols']
                 cell_sz = field['cell_size_m']
-                board_w = 0.40
-                half = board_w / 2.0
+                board_len, board_thickness = _board_dimensions(cfg)
+                half = board_len / 2.0
+                inward = max(cell_sz / 2.0 - board_thickness / 2.0, 0.0)
                 for obs in (cfg.get('obstacles') or []):
                     cell = obs['cell']
                     cx, cy = _cell_to_xy(cell, rows, cols, cell_sz, field['size_m'][0])
-                    edge = obs.get('edge', '')
-                    # 偏移到边上
+                    edge = str(obs.get('edge', '')).upper()
+                    # 贴近指定边，但 marker 中心仍保持在 YAML 指定 cell 内部。
                     if edge == 'N':
-                        cy += cell_sz / 2.0
+                        cy += inward
                         def_yaw = 0.0
                     elif edge == 'S':
-                        cy -= cell_sz / 2.0
+                        cy -= inward
                         def_yaw = 0.0
                     elif edge == 'E':
-                        cx += cell_sz / 2.0
+                        cx += inward
                         def_yaw = math.pi / 2.0
                     elif edge == 'W':
-                        cx -= cell_sz / 2.0
+                        cx -= inward
                         def_yaw = math.pi / 2.0
                     else:
                         def_yaw = 0.0  # 无 edge 则用格子中心(旧格式兼容)
@@ -104,9 +115,10 @@ class SimRobot(object):
                     ay = cy - half * math.sin(yaw)
                     bx = cx + half * math.cos(yaw)
                     by = cy + half * math.sin(yaw)
-                    self.obstacle_segments.append((ax, ay, bx, by, cx, cy))
+                    self.obstacle_segments.append(
+                        (ax, ay, bx, by, cx, cy, board_len, board_thickness))
                 if self.obstacle_segments:
-                    rospy.loginfo('[SimRobot] %d obstacles on grid lines', len(self.obstacle_segments))
+                    rospy.loginfo('[SimRobot] %d obstacles loaded', len(self.obstacle_segments))
         except Exception as e:
             rospy.logwarn('[SimRobot] Obstacle load failed: %s', e)
             self.obstacle_segments = []
@@ -172,7 +184,7 @@ class SimRobot(object):
         ranges = [12.0] * num_readings
 
         # 线段障碍物: 射线-线段求交 (纸板, 不是圆桶)
-        for ax, ay, bx, by, cx, cy in self.obstacle_segments:
+        for ax, ay, bx, by, cx, cy, board_len, board_thickness in self.obstacle_segments:
             # 线段向量
             sx = bx - ax
             sy = by - ay
@@ -209,7 +221,7 @@ class SimRobot(object):
     def _publish_obstacle_markers(self):
         """发布障碍物可视化 Marker (薄板, RViz 可看到纸板形状和朝向)。"""
         ma = MarkerArray()
-        for i, (ax, ay, bx, by, cx, cy) in enumerate(self.obstacle_segments):
+        for i, (ax, ay, bx, by, cx, cy, board_len, board_thickness) in enumerate(self.obstacle_segments):
             m = Marker()
             m.header.frame_id = 'map'
             m.header.stamp = rospy.Time.now()
@@ -224,9 +236,9 @@ class SimRobot(object):
             yaw = math.atan2(by - ay, bx - ax)
             q = tf.transformations.quaternion_from_euler(0, 0, yaw)
             m.pose.orientation = Quaternion(*q)
-            # 挡板尺寸: 宽40cm × 厚1cm × 高30cm
-            m.scale.x = 0.40
-            m.scale.y = 0.01
+            # 挡板尺寸: 长边 × 厚度 × 高30cm
+            m.scale.x = board_len
+            m.scale.y = board_thickness
             m.scale.z = 0.30
             m.color.r = 1.0
             m.color.g = 0.3

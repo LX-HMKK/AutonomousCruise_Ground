@@ -23,6 +23,12 @@
 - **mark_map_gui**：新增两点点击标定车头朝向（yaw），箭头渲染
 
 #### Fixed
+- `dwa_local_planner_params.yaml` 为全向底盘启用 `vy_samples` 横移采样，避免挡板附近只能前后/旋转导致卡死
+- RViz 默认关闭 raw local costmap 覆盖层，避免 3m rolling window 黑块遮挡全局地图和围栏
+- `sim_robot.py` 挡板 marker/LiDAR 线段中心不再压在格线，`edge` 贴边时向配置 cell 内缩进半个挡板厚度
+- `competition_field.yaml` 网格坐标说明修正，消除文档公式相对实际代码偏半格的问题
+- `sim_full_test.sh` 补充同步 `robot_slam/params/carto/*.yaml` 与 RViz 配置，避免 Windows 侧导航参数修改未生效
+- `sim_full_test.sh` 在 source ROS 环境时临时关闭 `nounset`，避免 `ROS_DISTRO: unbound variable` 导致同步前退出
 - `sim_full_test.sh` 5 处卡死：`grep -P` locale 限制、ROS_MASTER_URI 丢失、固定 `sleep 20`、`read -r` 阻塞、`rostopic echo` 无超时
 - `sim_robot.py`：`self.obstacle_xy` → `self.obstacle_segments` 变量名错误导致节点崩溃
 - `sim_robot.py`：`visualization_msgs` 导入容错

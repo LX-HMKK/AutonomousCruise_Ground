@@ -31,7 +31,7 @@ DWAPlannerROS:
   # ---- 轨迹模拟 ----
   sim_time: 1.7             # 前向模拟时长(s), 越大轨迹越平滑但计算越慢
   vx_samples: 10            # x速度采样数
-  vy_samples: 0             # y速度采样数 (0=纯差分驱动, 全向轮建议5~10)
+  vy_samples: 7             # y速度采样数 (0=纯差分驱动, 全向轮建议5~10)
   vth_samples: 20           # 角速度采样数
   controller_frequency: 10.0
 

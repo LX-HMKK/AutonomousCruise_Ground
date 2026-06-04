@@ -79,16 +79,17 @@ def generate_map(config_path, output_name):
     # ---- 障碍物 (由 sim_robot 动态注入激光数据, 不写入 PGM) ----
     obstacles = cfg.get('obstacles') or []
     if obstacles:
-        print('[i] %d obstacle(s) on grid lines (injected via sim_robot LiDAR)' % len(obstacles))
+        board_len, board_thickness = board_dimensions(cfg)
+        inward = max(cell_sz / 2.0 - board_thickness / 2.0, 0.0)
+        print('[i] %d obstacle(s) inside configured cells (injected via sim_robot LiDAR)' % len(obstacles))
         for obs in obstacles:
             cell = obs['cell']
             cx, cy = cell_center(cell, grid_cols, cell_sz, field_w, field_h)
-            edge = obs.get('edge', 'center')
-            off = cell_sz / 2.0
-            if edge == 'N': cy += off
-            elif edge == 'S': cy -= off
-            elif edge == 'E': cx += off
-            elif edge == 'W': cx -= off
+            edge = str(obs.get('edge', 'center')).upper()
+            if edge == 'N': cy += inward
+            elif edge == 'S': cy -= inward
+            elif edge == 'E': cx += inward
+            elif edge == 'W': cx -= inward
             print('    cell %d edge %s: (%.3f, %.3f)' % (cell, edge, cx, cy))
 
     # ---- 保存 ----
@@ -142,8 +143,19 @@ def cell_center(cell_number, cols, cell_sz, field_w, field_h):
     row = n // cols
     col = n % cols
     x = (col - cols / 2.0) * cell_sz + cell_sz / 2.0
-    y = (cols / 2.0 - row) * cell_sz - cell_sz / 2.0
+    rows = int(round(field_h / cell_sz))
+    y = (rows / 2.0 - row) * cell_sz - cell_sz / 2.0
     return round(x, 4), round(y, 4)
+
+
+def board_dimensions(cfg):
+    """返回挡板的 (length, thickness)。"""
+    size = cfg.get('obstacles_config', {}).get('board_size_m', [0.01, 0.40])
+    if not isinstance(size, list) or len(size) < 2:
+        size = [0.01, 0.40]
+    thickness = min(float(size[0]), float(size[1]))
+    length = max(float(size[0]), float(size[1]))
+    return length, thickness
 
 
 if __name__ == '__main__':
