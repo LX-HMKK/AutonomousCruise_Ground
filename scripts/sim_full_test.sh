@@ -36,6 +36,8 @@ cp "$SRC"/config/*.yaml "$WS"/config/
 cp "$SRC"/src/robot_slam/params/carto/*.yaml "$WS"/src/robot_slam/params/carto/
 cp "$SRC"/src/robot_slam/rviz/*.rviz "$WS"/src/robot_slam/rviz/
 cp "$SRC"/src/robot_slam/maps/"$MAP_NAME".* "$WS"/src/robot_slam/maps/ 2>/dev/null || true
+# 修复 Windows CRLF: 内核无法解析 #!/usr/bin/env python␍ → No such file or directory
+sed -i 's/\r$//' "$WS"/src/mission_manager/scripts/*.py "$WS"/src/common/scripts/*.py 2>/dev/null || true
 echo "  地图: $MAP_NAME  ($(head -1 "$WS"/src/robot_slam/maps/"$MAP_NAME".yaml 2>/dev/null || echo 'MISSING!'))"
 
 # 3. 启动
