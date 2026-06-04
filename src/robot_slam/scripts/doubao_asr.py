@@ -2,31 +2,33 @@
 # -*- coding: utf-8 -*-
 """豆包 ASR 节点：录音 → 豆包语音识别 → 检测到"开始比赛" → 发布 /start。
 
-替代 Snowboy 唤醒词方案，满足比赛"语音输出'开始比赛'指令"要求。
+豆包 ASR 使用火山引擎语音服务 (非方舟 Ark SDK)，模型 ID: volc.seedasr.auc。
+认证: Bearer Token (Ark API Key 通用)。
 """
+
 import rospy
 import os
 import sys
 import time
+import json
 import tempfile
 import pyaudio
 import wave
+import requests
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
 from API_KEY_DOUBAO import DOUBAO_KEY
 
-try:
-    from volcenginesdkarkruntime import Ark
-    HAS_ARK = True
-except ImportError:
-    HAS_ARK = False
+# ---- ASR 配置 ----
+ASR_RESOURCE_ID = "volc.seedasr.auc"   # 豆包语音识别模型 2.0
+ASR_API_URL = "https://openspeech.bytedance.com/api/v1/asr"
 
-# 录音参数
+# ---- 录音参数 ----
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK = 1024
-RECORD_SECONDS = 4          # 每次录音时长
+RECORD_SECONDS = 4
 FORMAT = pyaudio.paInt16
 
 
@@ -54,21 +56,16 @@ class DoubaoASR(object):
 
     def __init__(self):
         self.start_pub = rospy.Publisher('/start', String, queue_size=10)
-        if HAS_ARK and DOUBAO_KEY:
-            self.client = Ark(
-                base_url="https://ark.cn-beijing.volces.com/api/v3",
-                api_key=DOUBAO_KEY)
-        else:
-            self.client = None
-        rospy.loginfo('[DoubaoASR] Ready. Waiting for "开始比赛"...')
+        self.api_key = DOUBAO_KEY
+        rospy.loginfo('[DoubaoASR] Ready. Resource=%s  Waiting for "开始比赛"...',
+                      ASR_RESOURCE_ID)
 
     def run(self):
-        rate = rospy.Rate(0.5)  # 每 2 秒检查一次
+        rate = rospy.Rate(0.5)
         while not rospy.is_shutdown():
             if rospy.get_param('/start', False):
                 rospy.loginfo('[DoubaoASR] /start already set, exiting')
                 break
-
             try:
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
                     tmp_path = f.name
@@ -88,18 +85,30 @@ class DoubaoASR(object):
             rate.sleep()
 
     def _recognize(self, audio_path):
-        if self.client is None:
+        """调用豆包语音识别 HTTP API。"""
+        if not self.api_key:
+            rospy.logerr('[DoubaoASR] API key not set')
             return None
         try:
             with open(audio_path, 'rb') as f:
-                # 豆包语音识别模型: 火山引擎 Ark STT 模型
-                # 具体模型名以火山引擎控制台为准, 备选: doubao-pro-32k-stt / doubao-lite-stt
-                response = self.client.audio.transcriptions.create(
-                    model="doubao-pro-32k-stt",
-                    file=f,
-                    language="zh",
-                )
-            return response.text.strip()
+                audio_data = f.read()
+            headers = {
+                'Authorization': 'Bearer; ' + self.api_key,
+                'Resource-Id': ASR_RESOURCE_ID,
+                'Content-Type': 'audio/wav; codec=pcm; rate=%d' % SAMPLE_RATE,
+            }
+            resp = requests.post(ASR_API_URL, headers=headers, data=audio_data, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                # 火山引擎 ASR 返回格式: {"result": [{"text": "..."}]}
+                if 'result' in data and data['result']:
+                    return data['result'][0].get('text', '').strip()
+                elif 'text' in data:
+                    return data['text'].strip()
+                return str(data)
+            else:
+                rospy.logwarn('[DoubaoASR] HTTP %d: %s', resp.status_code, resp.text[:200])
+                return None
         except Exception as e:
             rospy.logerr('[DoubaoASR] Recognition failed: %s', e)
             return None

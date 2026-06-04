@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""豆包 TTS 节点：订阅 /voiceWords，调用豆包语音合成 API，mplayer 播放。
+"""豆包 TTS 节点：订阅 /voiceWords，调用豆包语音合成 HTTP API，mplayer 播放。
 
-实车使用，替代仿真 mock_tts.py。
+认证: Bearer Token (分号分隔), 资源 ID: volc.tts_async.default
+输出 /tts_done 通知状态机播报完成。
 """
+
 import rospy
 import os
 import sys
-import time
 import tempfile
+import requests
 from std_msgs.msg import String
 
-# 添加 abot_vlm 路径以导入 API key
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
 from API_KEY_DOUBAO import DOUBAO_KEY
 
-try:
-    from volcenginesdkarkruntime import Ark
-    HAS_ARK = True
-except ImportError:
-    HAS_ARK = False
-    rospy.logwarn('[DoubaoTTS] volcenginesdkarkruntime not installed, TTS disabled')
+# ---- TTS 配置 ----
+TTS_RESOURCE_ID = "volc.tts_async.default"  # 豆包语音合成 (长文本)
+TTS_API_URL = "https://openspeech.bytedance.com/api/v1/tts_async/submit"
+TTS_QUERY_URL = "https://openspeech.bytedance.com/api/v1/tts_async/query"
+TTS_APPID = "594a7b46"  # 与 iFlyTek 备份中相同
 
 
 class DoubaoTTS(object):
@@ -29,14 +29,8 @@ class DoubaoTTS(object):
     def __init__(self):
         self.tts_done_pub = rospy.Publisher('/tts_done', String, queue_size=10)
         rospy.Subscriber('/voiceWords', String, self._on_voice)
-        if HAS_ARK and DOUBAO_KEY:
-            self.client = Ark(
-                base_url="https://ark.cn-beijing.volces.com/api/v3",
-                api_key=DOUBAO_KEY)
-        else:
-            self.client = None
-        rospy.loginfo('[DoubaoTTS] Ready. HAS_ARK=%s KEY=%s',
-                      HAS_ARK, bool(DOUBAO_KEY))
+        self.api_key = DOUBAO_KEY
+        rospy.loginfo('[DoubaoTTS] Ready. resource=%s', TTS_RESOURCE_ID)
 
     def _on_voice(self, msg):
         text = msg.data.strip()
@@ -44,28 +38,69 @@ class DoubaoTTS(object):
             return
         rospy.loginfo('[DoubaoTTS] Speaking: %s', text[:50])
 
-        if self.client is not None:
+        if self.api_key:
             try:
-                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
-                    tmp_path = f.name
-                response = self.client.audio.speech.create(
-                    model="doubao-seed-tts-1.0",
-                    input=text,
-                    voice="zh_female_qingxin",
-                    response_format="mp3",
-                )
-                response.stream_to_file(tmp_path)
-                os.system('mplayer -really-quiet %s 2>/dev/null' % tmp_path)
-                os.unlink(tmp_path)
+                self._speak_async(text)
             except Exception as e:
                 rospy.logerr('[DoubaoTTS] TTS failed: %s', e)
         else:
-            # fallback: 用 espeak 念出来
             os.system('espeak -v zh "%s" 2>/dev/null' % text)
 
-        # 通知状态机播报完成
         self.tts_done_pub.publish(String(data='done'))
         rospy.loginfo('[DoubaoTTS] Done: %s', text[:30])
+
+    def _speak_async(self, text):
+        """提交异步 TTS 任务 → 轮询 → 下载 → mplayer 播放。"""
+        headers = {
+            'Authorization': 'Bearer; ' + self.api_key,
+            'Resource-Id': TTS_RESOURCE_ID,
+            'Content-Type': 'application/json',
+        }
+        # 提交合成任务
+        body = {
+            'appid': TTS_APPID,
+            'text': text,
+            'speaker': 'zh_female_qingxin',
+            'audio_params': {
+                'format': 'mp3',
+                'sample_rate': 16000,
+            },
+        }
+        resp = requests.post(TTS_API_URL, headers=headers, json=body, timeout=10)
+        if resp.status_code != 200:
+            rospy.logerr('[DoubaoTTS] Submit failed: %d %s', resp.status_code, resp.text[:200])
+            return
+        data = resp.json()
+        task_id = data.get('task_id', '')
+
+        # 轮询等待合成完成
+        import time
+        for _ in range(30):
+            time.sleep(0.3)
+            qresp = requests.get(TTS_QUERY_URL,
+                                 headers=headers,
+                                 params={'appid': TTS_APPID, 'task_id': task_id},
+                                 timeout=5)
+            if qresp.status_code == 200:
+                qdata = qresp.json()
+                if qdata.get('status') == 'success':
+                    audio_url = qdata.get('audio_url', '')
+                    if audio_url:
+                        self._download_and_play(audio_url)
+                    return
+
+        rospy.logwarn('[DoubaoTTS] TTS timeout for task %s', task_id)
+
+    def _download_and_play(self, url):
+        """下载音频文件并用 mplayer 播放。"""
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
+            tmp_path = f.name
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            with open(tmp_path, 'wb') as f:
+                f.write(r.content)
+            os.system('mplayer -really-quiet %s 2>/dev/null' % tmp_path)
+        os.unlink(tmp_path)
 
 
 if __name__ == '__main__':
