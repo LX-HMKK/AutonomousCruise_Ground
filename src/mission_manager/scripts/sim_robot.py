@@ -64,20 +64,27 @@ class SimRobot(object):
         self.y = init_y
         self.yaw = init_yaw
 
-        # 加载障碍物 (从 competition_field.yaml)
-        self.obstacle_xy = []
+        # 加载障碍物 (从 competition_field.yaml) — 建模为线段(纸板)
+        self.obstacle_segments = []  # [(ax, ay, bx, by), ...]
         config_path = _find_config('competition_field.yaml')
         if config_path:
             with open(config_path, 'r') as f:
                 cfg = yaml.safe_load(f)
             field = cfg['field']
+            board_w = 0.40  # 挡板宽度 (m)
             for obs in (cfg.get('obstacles') or []):
                 cx, cy = _cell_to_xy(obs['cell'],
                                      field['grid_rows'], field['grid_cols'],
                                      field['cell_size_m'], field['size_m'][0])
-                self.obstacle_xy.append((cx, cy, field['cell_size_m'] * 0.4))
-            if self.obstacle_xy:
-                rospy.loginfo('[SimRobot] %d dynamic obstacles loaded', len(self.obstacle_xy))
+                yaw = math.radians(obs.get('yaw_deg', 45))  # 挡板朝向, 默认45°
+                half = board_w / 2.0
+                ax = cx - half * math.cos(yaw)
+                ay = cy - half * math.sin(yaw)
+                bx = cx + half * math.cos(yaw)
+                by = cy + half * math.sin(yaw)
+                self.obstacle_segments.append((ax, ay, bx, by, cx, cy))
+            if self.obstacle_segments:
+                rospy.loginfo('[SimRobot] %d board obstacles loaded', len(self.obstacle_segments))
 
         # 发布
         self.odom_pub = rospy.Publisher('/odom', Odometry, queue_size=10)
@@ -139,35 +146,45 @@ class SimRobot(object):
         num_readings = 360
         ranges = [12.0] * num_readings
 
-        # 注入障碍物: 对每个激光射线, 检查是否命中障碍物
-        for ox, oy, orad in self.obstacle_xy:
-            dx = ox - self.x
-            dy = oy - self.y
-            dist = math.hypot(dx, dy)
-            if dist > 12.0:
+        # 线段障碍物: 射线-线段求交 (纸板, 不是圆桶)
+        for ax, ay, bx, by, cx, cy in self.obstacle_segments:
+            # 线段向量
+            sx = bx - ax
+            sy = by - ay
+            seg_len_sq = sx * sx + sy * sy
+            if seg_len_sq < 1e-10:
                 continue
-            bearing = math.atan2(dy, dx) - self.yaw
-            # 障碍物张角
-            angular_half = math.atan2(orad, dist) if dist > orad else 0.3
+
             for i in range(num_readings):
-                ray_angle = msg.angle_min + i * msg.angle_increment
-                # 规范化角度差
-                angle_diff = ray_angle - bearing
-                while angle_diff > math.pi:
-                    angle_diff -= 2 * math.pi
-                while angle_diff < -math.pi:
-                    angle_diff += 2 * math.pi
-                if abs(angle_diff) < angular_half and ranges[i] > dist:
-                    ranges[i] = dist - orad  # 障碍物表面距离
+                ray_angle = msg.angle_min + i * msg.angle_increment + self.yaw
+                rdx = math.cos(ray_angle)
+                rdy = math.sin(ray_angle)
+                rx = self.x
+                ry = self.y
+
+                # 射线-线段求交 (2D cross product)
+                cross_rs = rdx * sy - rdy * sx
+                if abs(cross_rs) < 1e-10:
+                    continue  # 平行
+
+                # t = 射线参数, u = 线段参数
+                dx_ar = rx - ax
+                dy_ar = ry - ay
+                t = (dx_ar * sy - dy_ar * sx) / (-cross_rs)
+                u = (dx_ar * rdy - dy_ar * rdx) / cross_rs
+
+                if t > 0.01 and 0.0 <= u <= 1.0:
+                    if t < ranges[i]:
+                        ranges[i] = t
 
         msg.ranges = ranges
         msg.intensities = [0.0] * num_readings
         self.scan_pub.publish(msg)
 
     def _publish_obstacle_markers(self):
-        """发布障碍物可视化 Marker (实心方块, RViz 可看到完整形状)。"""
+        """发布障碍物可视化 Marker (薄板, RViz 可看到纸板形状和朝向)。"""
         ma = MarkerArray()
-        for i, (ox, oy, orad) in enumerate(self.obstacle_xy):
+        for i, (ax, ay, bx, by, cx, cy) in enumerate(self.obstacle_segments):
             m = Marker()
             m.header.frame_id = 'map'
             m.header.stamp = rospy.Time.now()
@@ -175,19 +192,22 @@ class SimRobot(object):
             m.id = i
             m.type = Marker.CUBE
             m.action = Marker.ADD
-            m.pose.position.x = ox
-            m.pose.position.y = oy
-            m.pose.position.z = 0.15  # 半高
-            m.pose.orientation.w = 1.0
-            # 障碍物尺寸: 40cm×30cm×30cm (挡板)
+            m.pose.position.x = cx
+            m.pose.position.y = cy
+            m.pose.position.z = 0.15
+            # 朝向: 线段方向
+            yaw = math.atan2(by - ay, bx - ax)
+            q = tf.transformations.quaternion_from_euler(0, 0, yaw)
+            m.pose.orientation = Quaternion(*q)
+            # 挡板尺寸: 宽40cm × 厚2cm × 高30cm
             m.scale.x = 0.40
-            m.scale.y = 0.30
+            m.scale.y = 0.02
             m.scale.z = 0.30
             m.color.r = 1.0
             m.color.g = 0.3
             m.color.b = 0.1
-            m.color.a = 0.8
-            m.lifetime = rospy.Duration(0.5)  # 需要周期性刷新
+            m.color.a = 0.85
+            m.lifetime = rospy.Duration(0.5)
             ma.markers.append(m)
         self.obs_marker_pub.publish(ma)
 

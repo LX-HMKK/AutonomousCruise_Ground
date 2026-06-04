@@ -265,12 +265,12 @@ Visualization Manager:
       Name: Global Map
     - Class: rviz/Group
       Displays:
-        - Alpha: 0.85
+        - Alpha: 1.0
           Class: rviz/Map
-          Color Scheme: costmap
+          Color Scheme: raw
           Draw Behind: false
           Enabled: true
-          Name: Costmap (局部代价地图)
+          Name: Local Costmap (raw, 所有格子可见)
           Topic: /move_base/local_costmap/costmap
           Unreliable: false
           Use Timestamp: false

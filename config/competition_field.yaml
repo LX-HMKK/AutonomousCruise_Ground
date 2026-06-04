@@ -42,12 +42,12 @@ task_region:
   description: "任务点区域 38cm x 32cm，在对应黄色格子中居中"
 
 # 内部 8×8 区域随机挡板 (仿真用于测试避障)
-# 格子编号 10-72 (不含最外圈 1-9, 73-81 和中圈 10-17, 26, 35, 44, 53, 62, 71)
+# cell: 格子编号  yaw_deg: 挡板朝向(角度), 0=水平 90=竖直 45=斜向
 obstacles:
-  - cell: 23
-  - cell: 39
-  - cell: 43
-  - cell: 59
+  - { cell: 23, yaw_deg: 60 }
+  - { cell: 39, yaw_deg: 0  }
+  - { cell: 43, yaw_deg: 90 }
+  - { cell: 59, yaw_deg: 30 }
 
 obstacles_config:
   board_size_m: [0.01, 0.4]
