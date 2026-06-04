@@ -101,6 +101,7 @@ class MissionStateMachine(object):
         self.field_cfg = load_config('competition_field.yaml')
         self.mission_cfg = load_config('mission.yaml')
         self.voice_cfg = load_config('voice_text.yaml')
+        self.robot_cfg = load_config('robot.yaml')
 
         # 状态机
         self.state = MissionState.IDLE
@@ -310,19 +311,21 @@ class MissionStateMachine(object):
 
     def _on_safety_status(self, msg):
         """接收安全监控状态。"""
-        if msg.data.startswith('ESTOP'):
-            rospy.logerr('[Mission] Safety ESTOP received: %s', msg.data)
-            data_lower = msg.data.lower()
-            if 'collision' in data_lower:
-                self.transition(MissionState.ABORT_COLLISION_RISK)
-            elif 'manual' in data_lower:
-                self.transition(MissionState.MANUAL_STOP_REQUESTED)
-            elif 'heartbeat' in data_lower:
-                self.transition(MissionState.ABORT_TIMEOUT)
-            elif 'no_motion' in data_lower:
-                self.transition(MissionState.ABORT_TIMEOUT)
-            else:
-                self.transition(MissionState.ABORT_TIMEOUT)
+        if not msg.data.startswith('ESTOP'):
+            return
+        reason = msg.data[len('ESTOP:'):] if msg.data.startswith('ESTOP:') else ''
+        rospy.logerr('[Mission] Safety ESTOP received: %s', msg.data)
+
+        if reason == 'collision_risk':
+            self.transition(MissionState.ABORT_COLLISION_RISK)
+        elif reason == 'manual':
+            self.transition(MissionState.MANUAL_STOP_REQUESTED)
+        elif reason == 'heartbeat_lost':
+            self.transition(MissionState.ABORT_TIMEOUT)
+        elif reason == 'no_motion_after_start':
+            self.transition(MissionState.ABORT_TIMEOUT)
+        else:
+            self.transition(MissionState.ABORT_TIMEOUT)
 
     # ========== Phase Handlers ==========
 
@@ -334,7 +337,7 @@ class MissionStateMachine(object):
             self.transition(MissionState.START_ANNOUNCE)
 
     def _handle_start_announce(self):
-        text = self.voice_cfg['voice_text']['start']
+        text = self.voice_cfg['voice_text']['wakeup_detected']
         self._speak(text)
         if self._check_aborted():
             return
@@ -454,6 +457,11 @@ class MissionStateMachine(object):
         rospy.loginfo('[Mission] Phase %d: Recognition successful, target cell=%d',
                       phase, self.target_cell)
         self.rotation_attempt = 0
+        text = self.voice_cfg['voice_text']['task_image_recognized'].format(
+            index=phase, target_cell=self.target_cell)
+        self._speak(text)
+        if self._check_aborted():
+            return
         self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_TASK'))
 
     def _handle_navigate_to_task(self, phase):
@@ -464,6 +472,10 @@ class MissionStateMachine(object):
             return
 
         x, y = get_cell_center_xy(self.target_cell, self.field_cfg)
+        text = self.voice_cfg['voice_text']['navigating_to_task'].format(target_cell=self.target_cell)
+        self._speak(text)
+        if self._check_aborted():
+            return
         rospy.loginfo('[Mission] Phase %d: Navigating to cell %d (%.3f, %.3f)',
                       phase, self.target_cell, x, y)
 
@@ -531,6 +543,7 @@ class MissionStateMachine(object):
             max_retries = self.mission_cfg['timeouts']['navigation_retry_limit']
             if self.navigation_retry_count <= max_retries:
                 rospy.loginfo('[Mission] Nav retry %d/%d', self.navigation_retry_count, max_retries)
+                self.move_base_client.cancel_goal()
                 self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_TASK'))
                 return
             else:
@@ -544,7 +557,8 @@ class MissionStateMachine(object):
 
         # 精准到点判定：检查 footprint 是否完全进入任务点区域
         rx, ry, ryaw = self._get_current_pose()
-        footprint = [[-0.175, -0.15], [-0.175, 0.15], [0.175, 0.15], [0.175, -0.15]]
+        footprint = self.robot_cfg.get('footprint',
+            [[-0.175, -0.15], [-0.175, 0.15], [0.175, 0.15], [0.175, -0.15]])
 
         if rx is None:
             rospy.logwarn('[Mission] Phase %d: No pose available, skipping footprint check', phase)
@@ -671,6 +685,7 @@ class MissionStateMachine(object):
             if self.finish_nav_retry_count <= max_retries:
                 rospy.loginfo('[Mission] Finish nav retry %d/%d',
                               self.finish_nav_retry_count, max_retries)
+                self.move_base_client.cancel_goal()
                 self.transition(MissionState.NAVIGATE_TO_FINISH)
                 return
             else:
@@ -680,13 +695,14 @@ class MissionStateMachine(object):
             self.finish_nav_retry_count = 0
 
         self._stop_robot()
+        text = self.voice_cfg['voice_text']['finish_arrived']
+        self._speak(text)
+        if self._check_aborted():
+            return
         self.transition(MissionState.FINISH_ANNOUNCE)
 
     def _handle_finish_announce(self):
         text = self.voice_cfg['voice_text']['finish']
-        self._speak(text)
-        if self._check_aborted():
-            return
         self.logger.log_voice(text, 'finish')
         self.transition(MissionState.DONE)
 
@@ -699,11 +715,16 @@ class MissionStateMachine(object):
         self._stop_robot()
 
         # Speak appropriate abort message
+        vt = self.voice_cfg['voice_text']
         abort_texts = {
-            MissionState.ABORT_TIMEOUT: self.voice_cfg['voice_text']['abort_timeout'],
-            MissionState.ABORT_COLLISION_RISK: self.voice_cfg['voice_text']['abort_collision'],
+            MissionState.ABORT_TIMEOUT: vt['abort_timeout'],
+            MissionState.ABORT_COLLISION_RISK: vt['abort_collision'],
+            MissionState.ABORT_LOCALIZATION_LOST: vt['abort_localization_lost'],
+            MissionState.ABORT_PERCEPTION_FAILED: vt['abort_perception_failed'],
+            MissionState.ABORT_NAVIGATION_FAILED: vt['abort_navigation_failed'],
+            MissionState.MANUAL_STOP_REQUESTED: vt['abort_manual_stop'],
         }
-        text = abort_texts.get(self.state, '任务终止')
+        text = abort_texts.get(self.state, u'任务终止')
         self._speak(text)
         # 在 abort handler 中不需要再检查 abort（已经处于 abort 状态）
 
@@ -779,6 +800,10 @@ class MissionStateMachine(object):
         if self.perception_retry_count > max_retries:
             rospy.logerr('[Mission] Max perception retries (%d) exceeded', max_retries)
             self.transition(MissionState.ABORT_PERCEPTION_FAILED)
+            return
+        text = self.voice_cfg['voice_text']['task_image_failed'].format(index=phase)
+        self._speak(text)
+        if self._check_aborted():
             return
         rospy.loginfo('[Mission] Perception retry %d/%d, restarting rotation search',
                       self.perception_retry_count, max_retries)

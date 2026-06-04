@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """结构化日志：按 run_YYYYMMDD_HHMMSS 组织，记录状态机跳转、识别、导航、播报结果。"""
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
 import os
 import json
 import time

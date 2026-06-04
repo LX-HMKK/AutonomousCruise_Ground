@@ -1,15 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Mock TTS 仿真节点：订阅 /voiceWords，模拟播报后发布 /tts_done。
-
-用法:
-  rosrun mission_manager mock_tts.py
-  rosrun mission_manager mock_tts.py _speech_rate:=3.0  # 每秒 3 个汉字
-
-订阅: /voiceWords (std_msgs/String)
-发布: /tts_done   (std_msgs/String) - 内容为播报的文本，表示该条播报完成
-"""
-
+"""Mock TTS 仿真节点：订阅 /voiceWords，模拟播报后发布 /tts_done。"""
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
 import rospy
 import re
 from std_msgs.msg import String

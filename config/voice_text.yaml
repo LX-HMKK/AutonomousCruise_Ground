@@ -14,3 +14,7 @@ voice_text:
   finish_arrived: "已到达终点，比赛结束"
   abort_timeout: "任务超时，比赛结束"
   abort_collision: "检测到碰撞风险，比赛终止"
+  abort_localization_lost: "定位丢失，比赛终止"
+  abort_perception_failed: "任务图像识别失败，比赛终止"
+  abort_navigation_failed: "导航失败，比赛终止"
+  abort_manual_stop: "手动停止，比赛终止"
