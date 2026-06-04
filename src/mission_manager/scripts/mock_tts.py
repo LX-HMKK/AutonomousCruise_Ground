@@ -31,21 +31,25 @@ class MockTTS(object):
 
     def _count_chinese(self, text):
         """估算中文文本的朗读时长。"""
-        # 统计中文字符数
-        chinese = len(re.findall(r'[一-鿿]', text))
-        # 统计英文/数字词组数
-        english = len(re.findall(r'[a-zA-Z0-9]+', text))
-        return chinese + english * 0.5  # 英文按半个汉字算
+        if not isinstance(text, unicode):
+            text_u = text.decode('utf-8')
+        else:
+            text_u = text
+        # 统计中文字符数（Unicode 范围）
+        chinese = len(re.findall(ur'[一-鿿]', text_u))
+        # 统计英文/数字字符数（逐个字符，非词组）
+        english = len(re.findall(ur'[a-zA-Z0-9]', text_u))
+        return chinese + english * 0.5  # 英文字符按半个汉字算
 
     def _on_voice(self, msg):
         """收到播报请求，模拟播放后发布完成信号。"""
         text = msg.data
         rospy.loginfo('[MockTTS] Speaking: "%s"', text)
 
-        # 估算时长
+        # 估算时长（speech_rate 零值保护）
         char_count = self._count_chinese(text)
-        duration = max(self.min_duration, min(self.max_duration,
-                                               char_count / self.speech_rate))
+        rate = max(self.speech_rate, 0.1)
+        duration = max(self.min_duration, min(self.max_duration, char_count / rate))
         rospy.loginfo('[MockTTS] Estimated %.1f chars, playing for %.2fs',
                       char_count, duration)
 

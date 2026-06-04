@@ -79,6 +79,10 @@ def _point_in_polygon(px, py, polygon):
     for i in range(n):
         xi, yi = polygon[i]
         xj, yj = polygon[j]
+        # 跳过水平边或退化边，防止除零（yj == yi）
+        if abs(yj - yi) < 1e-12:
+            j = i
+            continue
         if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
             inside = not inside
         j = i

@@ -3,6 +3,8 @@
 """安全监控：watchdog、heartbeat、碰撞检测、超时检查。"""
 import os
 import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
 import rospy
 import time
 
@@ -56,7 +58,7 @@ class SafetyMonitor(object):
         if self.estop_active:
             return
         for i, dist in enumerate(msg.ranges):
-            if msg.range_min < dist < self.collision_range_m:
+            if msg.range_min < dist <= self.collision_range_m:
                 rospy.logerr('[Safety] COLLISION RISK! Range[%d]=%.3fm < %.3fm',
                              i, dist, self.collision_range_m)
                 self.logger.log_system('collision_risk',
