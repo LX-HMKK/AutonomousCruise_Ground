@@ -18,7 +18,7 @@ import requests
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_RESOURCE_ID
+from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_ASR_RESOURCE_ID
 
 # ---- ASR 配置 ----
 ASR_API_URL = "https://openspeech.bytedance.com/api/v1/asr"
@@ -57,7 +57,7 @@ class DoubaoASR(object):
         self.start_pub = rospy.Publisher('/start', String, queue_size=10)
         self.appid = SPEECH_APPID
         self.token = SPEECH_TOKEN
-        self.resource_id = SPEECH_RESOURCE_ID
+        self.resource_id = SPEECH_ASR_RESOURCE_ID
         rospy.loginfo('[DoubaoASR] Ready. resource=%s appid=%s',
                       self.resource_id, self.appid)
 

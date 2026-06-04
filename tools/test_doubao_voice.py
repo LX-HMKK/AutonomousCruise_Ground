@@ -4,16 +4,16 @@
 import os, sys, requests, json, uuid, base64, time, wave, struct, math
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'abot_vlm', 'scripts'))
-from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_RESOURCE_ID
+from API_KEY_DOUBAO import (SPEECH_APPID, SPEECH_TOKEN,
+    SPEECH_TTS_RESOURCE_ID, SPEECH_ASR_RESOURCE_ID)
 
 AUTH = 'Bearer; ' + SPEECH_TOKEN
-RID = SPEECH_RESOURCE_ID
 
 
 def test_tts():
     """测试豆包 TTS API (语音合成大模型-字符版)。"""
     print("\n=== TTS 语音合成 ===")
-    h = {'Authorization': AUTH, 'Resource-Id': RID, 'Content-Type': 'application/json'}
+    h = {'Authorization': AUTH, 'Resource-Id': SPEECH_TTS_RESOURCE_ID, 'Content-Type': 'application/json'}
     body = {
         'appid': SPEECH_APPID,
         'reqid': str(uuid.uuid4()),
@@ -72,7 +72,7 @@ def test_asr():
         {},
     ]
     for v in variants:
-        h = {'Authorization': AUTH, 'Resource-Id': RID, 'Content-Type': 'application/json'}
+        h = {'Authorization': AUTH, 'Resource-Id': SPEECH_ASR_RESOURCE_ID, 'Content-Type': 'application/json'}
         body = {
             'reqid': str(uuid.uuid4()),
             'audio': base64.b64encode(audio).decode('utf-8'),
