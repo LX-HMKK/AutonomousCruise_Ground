@@ -34,14 +34,14 @@ def generate_map(config_path, output_name):
     fence_h = field.get('fence_height_m', 0.30)
 
     # 地图参数
-    margin = 0.2  # 场地外围边距 (m)
+    margin = 0.6  # 场地外围边距 (m) — 给导航留缓冲
     resolution = 0.02  # m/pixel
-    map_w = field_w + 2 * margin  # 4.0m
-    map_h = field_h + 2 * margin  # 4.0m
-    img_w = int(map_w / resolution)  # 200px
-    img_h = int(map_h / resolution)  # 200px
-    origin_x = -map_w / 2.0  # -2.0
-    origin_y = -map_h / 2.0  # -2.0
+    map_w = field_w + 2 * margin
+    map_h = field_h + 2 * margin
+    img_w = int(map_w / resolution)
+    img_h = int(map_h / resolution)
+    origin_x = -map_w / 2.0
+    origin_y = -map_h / 2.0
 
     # 创建白色画布 (254 = 自由空间)
     img = Image.new('L', (img_w, img_h), 254)
@@ -58,11 +58,8 @@ def generate_map(config_path, output_name):
     fence_r = world_to_pixel(field_w / 2, 0)[0]
     fence_t = world_to_pixel(0, field_h / 2)[1]
     fence_b = world_to_pixel(0, -field_h / 2)[1]
-    fence_px = max(1, int(fence_h / resolution))  # 围栏像素厚度
-
-    for i in range(fence_px):
-        draw.rectangle([fence_l + i, fence_t + i, fence_r - i, fence_b - i],
-                       outline=0)
+    # 围栏: 1 像素细线 (仿真不需要物理厚度, 否则起点在围栏里)
+    draw.rectangle([fence_l, fence_t, fence_r, fence_b], outline=0, width=2)
 
     # ---- 网格线 (浅灰, 不影响导航) ----
     grid_gray = 200
