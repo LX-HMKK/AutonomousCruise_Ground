@@ -8,9 +8,12 @@
   python tools/mark_map_gui.py -m game -o my_points.yaml
 
 操作:
-  左键点击        = 添加点
-  右键点击        = 删除最近点
-  鼠标滚轮        = 缩放 (以光标为中心)
+  左键点击第1次    = 添加点，进入朝向模式
+  移动鼠标         = 调整车头方向
+  左键点击第2次    = 确认朝向
+  右键/ESC          = 取消朝向模式(朝向归0)
+  双击点            = 重新调整朝向
+  鼠标滚轮          = 缩放 (以光标为中心)
   中键/Shift+左键拖拽 = 平移
   R 键            = 重置视图
   输入名称 + 回车  = 为最新点命名
@@ -22,6 +25,7 @@
 
 import os
 import sys
+import math
 import argparse
 import yaml
 import json
@@ -54,6 +58,7 @@ class ZoomPanCanvas(tk.Canvas):
         self._drag_pan_x = 0.0
         self._drag_pan_y = 0.0
         self._dragging = False
+        self.on_transform = None  # 缩放/平移后回调
 
         # 绑定
         self.bind('<MouseWheel>', self._on_mousewheel)       # Windows
@@ -107,6 +112,8 @@ class ZoomPanCanvas(tk.Canvas):
         self.pan_x = cx - (cx - self.pan_x) * factor
         self.pan_y = cy - (cy - self.pan_y) * factor
         self.zoom = new_zoom
+        if self.on_transform:
+            self.on_transform()
 
     # ---- 平移 ----
     def _on_pan_start(self, event):
@@ -126,6 +133,8 @@ class ZoomPanCanvas(tk.Canvas):
     def _on_pan_stop(self, event):
         self._dragging = False
         self.config(cursor='crosshair')
+        if self.on_transform:
+            self.on_transform()
 
 
 class MapMarker(tk.Tk):
@@ -167,11 +176,15 @@ class MapMarker(tk.Tk):
         self.pil_img_orig = Image.open(pgm_path)
         self.img_w, self.img_h = self.pil_img_orig.size
 
-        # 数据：存储原图像素坐标 + map 坐标
-        # points: [(img_px, img_py, map_x, map_y, name), ...]
+        # 数据：存储原图像素坐标 + map 坐标 + 朝向
+        # points: [(img_px, img_py, map_x, map_y, name, yaw_rad), ...]
         self.points = []
         self.counter = 0
         self.dot_radius = 3
+        self.arrow_len = 14  # 箭头像素长度
+        self._heading_mode = False  # 是否在等待用户拖拽确认朝向
+        self._heading_point = None  # (ipx, ipy, mx, my) 等待确认朝向的点
+        self._heading_line = None   # canvas line id for preview
 
         # ---- UI ----
         self.title('Map Marker: %s  (%.3f m/px | %dx%d px | origin [%.2f, %.2f])' % (
@@ -212,6 +225,7 @@ class MapMarker(tk.Tk):
         self.canvas = ZoomPanCanvas(self, self.img_w, self.img_h,
                                      cursor='crosshair', bg='#2b2b2b',
                                      highlightthickness=0)
+        self.canvas.on_transform = self._on_view_changed
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         # 画布初始化后加载图片并重置视图
@@ -234,7 +248,9 @@ class MapMarker(tk.Tk):
         # 左键/右键点击（画布级）
         self.canvas.bind('<Button-1>', self._on_left_click)
         self.canvas.bind('<Button-3>', self._on_right_click)
+        self.canvas.bind('<Double-Button-1>', self._on_double_click)
         self.canvas.bind('<Motion>', self._on_mouse_move)
+        self.bind('<Escape>', self._on_escape)
 
         self.protocol('WM_DELETE_WINDOW', self._on_close)
 
@@ -248,7 +264,8 @@ class MapMarker(tk.Tk):
             self.origin_y, self.origin_y + self.img_h * self.resolution))
         print('')
         print('  滚轮=缩放  Shift+拖拽=平移  中键拖拽=平移  R=重置视图')
-        print('  左键=添加点  右键=撤销  S=保存  ESC=退出')
+        print('  左键第1次=放置点(进入朝向模式)  移动鼠标=设车头方向  左键第2次=确认')
+        print('  双击点=重新调朝向  右键=取消朝向/撤销  S=保存  ESC=退出')
         print('=' * 60)
 
     def _load_image(self):
@@ -268,20 +285,23 @@ class MapMarker(tk.Tk):
 
     def _update_bg_transform(self):
         """更新背景图片的缩放/平移。"""
-        scale_x = self.img_w * self.canvas.zoom
-        scale_y = self.img_h * self.canvas.zoom
+        scale_x = max(1, int(self.img_w * self.canvas.zoom))
+        scale_y = max(1, int(self.img_h * self.canvas.zoom))
         self.canvas.coords(self._bg_img_id, self.canvas.pan_x, self.canvas.pan_y)
-        self.canvas.itemconfig(self._bg_img_id,
-                                image=ImageTk.PhotoImage(
-                                    self.pil_img_orig.resize(
-                                        (max(1, int(scale_x)), max(1, int(scale_y))),
-                                        Image.NEAREST)))
+        self._tk_img = ImageTk.PhotoImage(
+            self.pil_img_orig.resize((scale_x, scale_y), Image.NEAREST))
+        self.canvas.itemconfig(self._bg_img_id, image=self._tk_img)
 
     def _reset_view(self):
         self.canvas.reset_view()
         self._update_bg_transform()
         self._redraw_points()
         self.status_var.set('视图已重置  zoom=%.2fx' % self.canvas.zoom)
+
+    def _on_view_changed(self):
+        """缩放/平移后更新背景图和点。"""
+        self._update_bg_transform()
+        self._redraw_points()
 
     # ---- 坐标换算 ----
     def _img_to_map(self, px, py):
@@ -298,34 +318,120 @@ class MapMarker(tk.Tk):
 
     # ---- 事件 ----
     def _on_left_click(self, event):
-        """左键点击画布 = 在图像像素位置添加点。"""
-        # 检查是否在背景图区域内
+        """左键：第1次放点进入朝向模式，第2次确认朝向。"""
         ipx, ipy = self.canvas.canvas_to_img(event.x, event.y)
         if not (0 <= ipx < self.img_w and 0 <= ipy < self.img_h):
             return
 
-        self.counter += 1
-        mx, my = self._img_to_map(ipx, ipy)
-        name = 'P%d' % self.counter
-        self.points.append((ipx, ipy, mx, my, name))
-        self._redraw_points()
-        self.status_var.set('添加 %s:  map=(%.4f, %.4f)  像素=(%.1f, %.1f)  zoom=%.1fx' %
-                            (name, mx, my, ipx, ipy, self.canvas.zoom))
-        print('[+] %s: map=(%.4f, %.4f)' % (name, mx, my))
+        if self._heading_mode:
+            # 第2次点击：确认朝向
+            mx, my = self._heading_point[2], self._heading_point[3]
+            # 计算 yaw: atan2(dy, dx) where dx,dy is from point to cursor in map frame
+            # 图像坐标 y 轴向下, map 坐标 y 轴向上
+            dy_img = ipy - self._heading_point[1]  # 图像坐标差
+            dx_img = ipx - self._heading_point[0]
+            yaw = math.atan2(-dy_img, dx_img)  # 翻转Y得到map朝向
+            self.points.append((self._heading_point[0], self._heading_point[1],
+                               self._heading_point[2], self._heading_point[3],
+                               self._heading_point[4], yaw))
+            self._heading_mode = False
+            self._heading_point = None
+            self._clear_heading_preview()
+            self._redraw_points()
+            self.status_var.set('确认点 %s  yaw=%.2f rad (%.1f°)' %
+                               (self.points[-1][4], yaw, math.degrees(yaw)))
+            print('[+] %s: map=(%.4f, %.4f)  yaw=%.2f rad (%.1f°)' %
+                  (self.points[-1][4], mx, my, yaw, math.degrees(yaw)))
+        else:
+            # 第1次点击：放置点，进入朝向模式
+            self.counter += 1
+            mx, my = self._img_to_map(ipx, ipy)
+            name = 'P%d' % self.counter
+            self._heading_mode = True
+            self._heading_point = (ipx, ipy, mx, my, name)
+            self.status_var.set('放置 %s  map=(%.4f,%.4f)  移动鼠标设置朝向, 再次点击确认, 右键/Esc取消' %
+                               (name, mx, my))
+
+    def _on_double_click(self, event):
+        """双击已有点：重新进入朝向模式。"""
+        ipx, ipy = self.canvas.canvas_to_img(event.x, event.y)
+        # 找最近的已有点
+        if not self.points:
+            return
+        closest = None
+        closest_dist = float('inf')
+        for i, (px, py, mx, my, name, yaw) in enumerate(self.points):
+            dist = math.hypot(ipx - px, ipy - py)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest = i
+        threshold = 15 / self.canvas.zoom  # 像素距离阈值
+        if closest is not None and closest_dist < threshold:
+            px, py, mx, my, name, yaw = self.points.pop(closest)
+            self._heading_mode = True
+            self._heading_point = (px, py, mx, my, name)
+            self._redraw_points()
+            self.status_var.set('正在调整 %s 的朝向, 点击确认, 右键/Esc取消' % name)
 
     def _on_right_click(self, event):
-        self._undo()
+        """右键：朝向模式下取消朝向(设yaw=0)，普通模式下撤销最近点。"""
+        if self._heading_mode:
+            # 取消朝向模式，以 yaw=0 确认
+            px, py, mx, my, name = self._heading_point
+            self.points.append((px, py, mx, my, name, 0.0))
+            self._heading_mode = False
+            self._heading_point = None
+            self._clear_heading_preview()
+            self._redraw_points()
+            self.status_var.set('取消朝向 %s  yaw=0 (朝向归零)' % name)
+            print('[+] %s: map=(%.4f, %.4f)  yaw=0 (no heading)' % (name, mx, my))
+        else:
+            self._undo()
+
+    def _on_escape(self, event):
+        """Esc: 取消朝向模式。"""
+        if self._heading_mode:
+            self._on_right_click(None)
 
     def _on_mouse_move(self, event):
         ipx, ipy = self.canvas.canvas_to_img(event.x, event.y)
         in_img = 0 <= ipx < self.img_w and 0 <= ipy < self.img_h
+
+        # 朝向模式下更新预览箭头
+        if self._heading_mode and in_img:
+            px, py = self._heading_point[0], self._heading_point[1]
+            dy_img = ipy - py
+            dx_img = ipx - px
+            yaw = math.atan2(-dy_img, dx_img)
+            self._draw_heading_preview(px, py, yaw)
+
         if in_img:
             mx, my = self._img_to_map(ipx, ipy)
             self.status_var.set(
-                '像素:(%.1f, %.1f)  map:(%.4f, %.4f)  |  已标 %d 点  zoom=%.1fx  |  滚轮缩放 Shift拖拽平移' %
-                (ipx, ipy, mx, my, len(self.points), self.canvas.zoom))
+                '像素:(%.1f, %.1f)  map:(%.4f, %.4f)  |  已标 %d 点  zoom=%.1fx  |  %s' %
+                (ipx, ipy, mx, my, len(self.points), self.canvas.zoom,
+                 '【朝向模式：移动鼠标→点击确认】' if self._heading_mode else '左键标点'))
         else:
             self.status_var.set('鼠标在地图外  |  已标 %d 点  zoom=%.1fx' % (len(self.points), self.canvas.zoom))
+
+    def _draw_heading_preview(self, ipx, ipy, yaw):
+        """绘制朝向预览线。"""
+        self._clear_heading_preview()
+        cx, cy = self.canvas.img_to_canvas(ipx, ipy)
+        z = self.canvas.zoom
+        al = self.arrow_len * z
+        end_cx = cx + math.cos(yaw) * al
+        end_cy = cy - math.sin(yaw) * al  # Canvas Y向下
+        self._heading_line = self.canvas.create_line(
+            cx, cy, end_cx, end_cy,
+            fill='#ff4444', width=max(2, int(3 * z)),
+            arrow=tk.LAST, arrowshape=(int(10 * z), int(12 * z), int(5 * z)),
+            tags=('heading_preview',))
+
+    def _clear_heading_preview(self):
+        if self._heading_line:
+            self.canvas.delete(self._heading_line)
+            self._heading_line = None
 
     def _on_close(self):
         if self.points:
@@ -347,19 +453,31 @@ class MapMarker(tk.Tk):
         z = self.canvas.zoom
         r = max(2, int(self.dot_radius * z))  # 圆点大小随缩放
         font_size = max(7, int(10 * z))
-        for ipx, ipy, mx, my, name in self.points:
+        al = self.arrow_len * z  # 箭头长度
+        for ipx, ipy, mx, my, name, yaw in self.points:
             cx, cy = self.canvas.img_to_canvas(ipx, ipy)
+            # 圆点
             oval = self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
                                             fill='#ff4444', outline='#ffff00',
                                             width=max(1, int(1.5 * z)),
                                             tags=('dot',))
             self._dot_ovals.append(oval)
+            # 标签
             txt = self.canvas.create_text(cx + r + 2, cy - r - 2,
                                            text=name, anchor=tk.NW,
                                            fill='#00ff88',
                                            font=('Consolas', font_size, 'bold'),
                                            tags=('label',))
             self._dot_labels.append(txt)
+            # 朝向箭头 (canvas: Y向下)
+            end_cx = cx + math.cos(yaw) * al
+            end_cy = cy - math.sin(yaw) * al
+            arrow = self.canvas.create_line(
+                cx, cy, end_cx, end_cy,
+                fill='#ffaa00', width=max(1, int(2 * z)),
+                arrow=tk.LAST, arrowshape=(int(8 * z), int(10 * z), int(4 * z)),
+                tags=('arrow',))
+            self._dot_ovals.append(arrow)
 
     def _rename_last(self):
         new_name = self.name_var.get().strip()
@@ -369,8 +487,8 @@ class MapMarker(tk.Tk):
         if not self.points:
             self.status_var.set('没有点可重命名')
             return
-        ipx, ipy, mx, my, _ = self.points[-1]
-        self.points[-1] = (ipx, ipy, mx, my, new_name)
+        ipx, ipy, mx, my, _, yaw = self.points[-1]
+        self.points[-1] = (ipx, ipy, mx, my, new_name, yaw)
         self._redraw_points()
         self.name_var.set('')
         self.status_var.set('已重命名为 "%s"' % new_name)
@@ -407,8 +525,9 @@ class MapMarker(tk.Tk):
             'count': len(self.points),
             'points': [],
         }
-        for ipx, ipy, mx, my, name in self.points:
-            data['points'].append({'name': name, 'x': mx, 'y': my, 'z': 0.0})
+        for ipx, ipy, mx, my, name, yaw in self.points:
+            data['points'].append({'name': name, 'x': mx, 'y': my, 'z': 0.0,
+                                   'yaw_rad': round(yaw, 4), 'yaw_deg': round(math.degrees(yaw), 1)})
 
         yaml_path = self.output_file
         json_path = yaml_path.replace('.yaml', '.json').replace('.yml', '.json')
@@ -423,7 +542,8 @@ class MapMarker(tk.Tk):
         print('=' * 60)
         print('  Saved: %s' % yaml_path)
         for p in data['points']:
-            print('    %s: [%.4f, %.4f, 0.0]' % (p['name'], p['x'], p['y']))
+            print('    %s: [%.4f, %.4f, 0.0]  yaw: %.1f°' %
+                  (p['name'], p['x'], p['y'], p.get('yaw_deg', 0)))
         print('=' * 60)
 
     def _show_list(self):
@@ -439,12 +559,14 @@ class MapMarker(tk.Tk):
                   font=('Consolas', 10, 'bold')).pack(anchor=tk.W, pady=2)
         text = tk.Text(frame, font=('Consolas', 10))
         text.pack(fill=tk.BOTH, expand=True)
-        for i, (ipx, ipy, mx, my, name) in enumerate(self.points):
-            text.insert(tk.END, '%-4d  %-14s  %12.4f  %12.4f  0.0\n' % (i + 1, name, mx, my))
+        for i, (ipx, ipy, mx, my, name, yaw) in enumerate(self.points):
+            text.insert(tk.END, '%-4d  %-14s  %12.4f  %12.4f  0.0  yaw: %.1f°\n' %
+                       (i + 1, name, mx, my, math.degrees(yaw)))
         text.config(state=tk.DISABLED)
 
         def _copy():
-            lines = ['%s: [%.4f, %.4f, 0.0]' % (n, x, y) for _, _, x, y, n in self.points]
+            lines = ['%s: [%.4f, %.4f, 0.0]  yaw: %.2f rad (%.1f°)' %
+                     (n, x, y, yw, math.degrees(yw)) for _, _, x, y, n, yw in self.points]
             self.clipboard_clear()
             self.clipboard_append('\n'.join(lines))
             self.status_var.set('已复制 %d 个点到剪贴板' % len(self.points))
