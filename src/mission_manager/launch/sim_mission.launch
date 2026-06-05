@@ -18,5 +18,7 @@
     <param name="sim_mode" value="$(arg sim_mode)"/>
   </node>
 
-  <node pkg="mission_manager" type="safety_monitor.py" name="safety_monitor" output="screen"/>
+  <node pkg="mission_manager" type="safety_monitor.py" name="safety_monitor" output="screen">
+    <param name="heartbeat_timeout_s" value="10.0"/>  <!-- 放宽，避免 init 期间误判 -->
+  </node>
 </launch>

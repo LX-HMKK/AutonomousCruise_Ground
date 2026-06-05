@@ -94,6 +94,7 @@ src/
 ## Git 提交规范
 
 Angular 格式，中文消息：`<type>(<scope>): <简述>`。type: feat/fix/docs/style/refactor/test/chore/perf。
+**禁止在 commit message 中添加 `Co-Authored-By: Claude` 等 Claude 协作者信息。**
 
 ## 关键开发陷阱
 

@@ -249,8 +249,8 @@ elif [ -n "$SSH_CONNECTION" ] || ! command -v gnome-terminal >/dev/null 2>&1; th
     echo "[SSH] 清理旧进程..."
     pkill -f 'roscore|roslaunch|rosrun|rplidarNode|move_base|amcl|mission_state_machine|safety_monitor|doubao_tts|top_view_shot_node|usb_cam_node' 2>/dev/null || true
     sleep 3
-    # 确保 ROS master 端口释放
-    while lsof -ti:11311 >/dev/null 2>&1; do
+    # 确保 ROS master 端口释放 (lsof 可能不存在，用 ss 替代)
+    while ss -tlnp 2>/dev/null | grep -q ':11311\b'; do
         echo "  等待端口 11311 释放..."
         sleep 1
     done
@@ -351,11 +351,16 @@ track $!
 sleep 15
 
 # [3.5] 初始位姿 (比赛场地起点)
-echo '[3.5] 发送初始位姿...'
+echo '[3.5] 发送初始位姿 + map->odom TF...'
 sleep 3
 rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped \
     "{header: {frame_id: map}, pose: {pose: {position: {x: -1.6, y: 1.6, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}" \
     > /tmp/comp_initpose.log 2>&1 || true
+# AMCL 1.16.7 有 bug: 收到 initialpose 后不发布 map->odom TF
+# 导致 map frame 不存在, move_base costmap 无法初始化, 车不动。
+# 用 static_transform_publisher 手动建立 map frame, 机器人完全靠 odometry 导航。
+static_transform_publisher -1.6 1.6 0 0 0 0 1 map odom 100 &
+track $!
 
 # [4] VLM + TTS
 echo '[4/5] VLM + TTS...'
@@ -370,6 +375,12 @@ sleep 2
 echo '[5/5] 状态机 + 安全...'
 roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} > /tmp/comp_mission.log 2>&1 &
 track $!
+
+# [6] RViz 可视化
+echo '[6] RViz...'
+roslaunch robot_slam view_nav.launch > /tmp/comp_rviz.log 2>&1 &
+track $!
+sleep 2
 
 echo "=== 全部启动完成 ($(date '+%H:%M:%S')) ==="
 timeout 3 rostopic list 2>/dev/null | wc -l | xargs -I{} echo "话题数: {}"

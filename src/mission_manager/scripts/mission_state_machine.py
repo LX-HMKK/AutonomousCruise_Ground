@@ -18,6 +18,7 @@ from nav_msgs.msg import Odometry
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from actionlib_msgs.msg import GoalStatus
 import actionlib
+import tf as ros_tf
 import tf.transformations as tft
 
 # Add common scripts to path for imports
@@ -119,9 +120,13 @@ class MissionStateMachine(object):
         self.last_nav_goal = None  # 最近一次发送给 move_base 的 (x, y, yaw)
 
         # ROS 接口
-        # 先创建 heartbeat publisher 并立刻发布，防止 safety 误判超时
+        # TF 位姿 fallback: AMCL /amcl_pose 发布有 bug (仅发1条), 用 TF 作为备胎
+        self.tf_listener = ros_tf.TransformListener()
+
+        # 先创建 heartbeat publisher + Timer，防止 safety 在 wait_for_server 期间误判超时
         self.heartbeat_pub = rospy.Publisher('/mission_heartbeat', String, queue_size=1)
         self.heartbeat_pub.publish(String(data='init'))
+        self.heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._publish_heartbeat)
         self.voice_pub = rospy.Publisher('/voiceWords', String, queue_size=10)
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
 
@@ -141,7 +146,7 @@ class MissionStateMachine(object):
         #   amcl_pose(实机 map 系全局定位) > abot/pose(预留) > odom(仿真兜底)
         # 仿真: sim_robot 只发 /odom 且已是 map 系真值, 收不到 /amcl_pose, 自动用 odom, 行为不变。
         # 实机: AMCL 发 /amcl_pose(map 系), 用它做 footprint 判定才坐标系一致。
-        self._POSE_RANK = {'odom': 1, 'abot_pose': 2, 'amcl_pose': 3}
+        self._POSE_RANK = {'odom': 1, 'odom_tf': 2, 'abot_pose': 2, 'amcl_pose': 3}
         self._pose_source_rank = 0  # 当前 current_pose 的来源等级, 0=尚无位姿
         # AMCL 协方差监控状态 (仅实机有 /amcl_pose 时更新; 仿真用 odom, 这些保持初值不触发)
         self._amcl_pos_std = 0.0
@@ -164,9 +169,6 @@ class MissionStateMachine(object):
         self.tts_done_event = threading.Event()
         self.tts_done_event.set()  # 初始非等待状态
         self._tts_pending = None   # 正在等待的播报文本，防陈旧 /tts_done 误触发
-
-        # 心跳定时器 (2s 间隔，独立于主循环，防止安全监控误判超时)
-        self.heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._publish_heartbeat)
 
         rospy.loginfo('[Mission] State machine initialized, sim_mode=%s', sim_mode)
 
@@ -888,6 +890,23 @@ class MissionStateMachine(object):
             return
 
         self._check_localization()
+        self._update_pose_from_tf()  # 当 AMCL /amcl_pose 停发时用 TF 更新位姿
+
+    def _update_pose_from_tf(self):
+        """当 AMCL /amcl_pose 停发时从 TF (map→base_link) 获取位姿作为 fallback。
+
+        AMCL 1.16.7 有 bug: /amcl_pose 仅发1条后停止，但 map→odom TF 正常发布。
+        本方法在 AMCL pose 可用时不干预(rank 低于 amcl_pose 不会被接受)。
+        """
+        try:
+            (trans, rot) = self.tf_listener.lookupTransform(
+                'map', 'base_link', rospy.Time(0))
+            x, y = trans[0], trans[1]
+            _, _, yaw = tft.euler_from_quaternion(rot)
+            self._update_pose('odom_tf', x, y, yaw)
+        except (ros_tf.LookupException, ros_tf.ConnectivityException,
+                ros_tf.ExtrapolationException, TypeError):
+            pass
 
     def _check_localization(self):
         """监控 AMCL 定位是否发散（粒子群协方差过大且持续）。
@@ -914,13 +933,18 @@ class MissionStateMachine(object):
 
         # AMCL 长时间无更新也视为定位异常
         stale_s = loc_cfg.get('amcl_stale_s', 3.0)
+        max_pos = loc_cfg.get('max_pos_std_m', 0.5)
+        max_yaw = loc_cfg.get('max_yaw_std_rad', 0.5)
         now = time.time()
         diverged = False
-        if last_time > 0 and (now - last_time) > stale_s:
+        stale_triggered = False
+        std_triggered = False
+        if stale_s > 0 and last_time > 0 and (now - last_time) > stale_s:
             diverged = True
-        if pos_std > loc_cfg.get('max_pos_std_m', 0.5) or \
-           yaw_std > loc_cfg.get('max_yaw_std_rad', 0.5):
+            stale_triggered = True
+        if pos_std > max_pos or yaw_std > max_yaw:
             diverged = True
+            std_triggered = True
 
         if not diverged:
             self._localization_lost_since = None
@@ -929,8 +953,9 @@ class MissionStateMachine(object):
         # 需持续超过 lost_duration_s 才判定丢失，避免单次抖动误触发
         if self._localization_lost_since is None:
             self._localization_lost_since = now
-            rospy.logwarn('[Mission] Localization diverging: pos_std=%.2fm yaw_std=%.2frad',
-                          pos_std, yaw_std)
+            rospy.logwarn('[Mission] Localization diverging: pos_std=%.3fm(max=%.3f) yaw_std=%.3frad(max=%.3f) stale=%s(%.1f/%.1fs)',
+                          pos_std, max_pos, yaw_std, max_yaw,
+                          stale_triggered, now - last_time if last_time > 0 else 0.0, stale_s)
             return
         lost_duration = loc_cfg.get('lost_duration_s', 3.0)
         if now - self._localization_lost_since > lost_duration:

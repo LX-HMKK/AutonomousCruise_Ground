@@ -9,7 +9,7 @@ Worker 负责: 纯豆包 API 调用，零 ROS 依赖
 import rospy
 import cv2
 import numpy as np
-import os, sys, json, re, hashlib, subprocess, time
+import os, sys, json, re, hashlib, subprocess, threading, time
 from sensor_msgs.msg import Image as ROSImage
 from std_msgs.msg import String
 
@@ -63,14 +63,19 @@ def call_worker(img_path, prompt, image_id, timeout_s=30):
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = proc.communicate(timeout=timeout_s)
+        # Python 2.7: communicate() 无 timeout 参数, 用 Timer 实现超时
+        t = threading.Timer(timeout_s, proc.kill)
+        try:
+            t.start()
+            stdout, stderr = proc.communicate()
+        finally:
+            t.cancel()
         if proc.returncode != 0:
-            rospy.logerr('[VLM] Worker failed (rc=%d): %s', proc.returncode, stderr.strip())
+            if proc.returncode == -9:
+                rospy.logerr('[VLM] Worker timeout (%ds)', timeout_s)
+            else:
+                rospy.logerr('[VLM] Worker failed (rc=%d): %s', proc.returncode, stderr.strip())
         result = json.loads(stdout.strip()) if stdout.strip() else {}
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        rospy.logerr('[VLM] Worker timeout (%ds)', timeout_s)
-        result = {}
     except Exception as e:
         rospy.logerr('[VLM] Worker exception: %s', str(e))
         result = {}

@@ -14,8 +14,8 @@ mission:
 
 # ---- 超时配置 ----
 timeouts:
-  no_motion_after_start_s: 20      # 启动后无运动超时 (safety_monitor 用)
-  no_state_change_s: 40            # 单状态最长停留时间 (导航+识别可能较长)
+  no_motion_after_start_s: 40      # 启动后无运动超时 (safety_monitor 用)，放宽给 costmap 初始化
+  no_state_change_s: 60            # 单状态最长停留时间 (导航+识别可能较长)
   perception_retry_limit: 1        # 识别失败最大重试次数 (省token，仅重试1次)
   navigation_retry_limit: 2        # 导航失败最大重试次数
   footprint_retry_limit: 2         # 到达后 footprint 修正次数，避免厘米级误差反复等待
@@ -48,4 +48,4 @@ localization:
   max_pos_std_m: 0.8               # 位置标准差阈值(m), 超过视为粒子群发散 (实车站立起步 std~0.43m, 放宽容忍未运动收敛)
   max_yaw_std_rad: 0.5             # 朝向标准差阈值(rad)
   lost_duration_s: 6.0             # 发散需持续多久才判定丢失(s), 防单次抖动误判 (放宽容忍运动中短暂波动)
-  amcl_stale_s: 3.0                # /amcl_pose 超过此时间无更新也视为定位异常(s)
+  amcl_stale_s: 0.0                # 0=禁用 stale 检查 (AMCL 1.16.7 /amcl_pose 发布有 bug，仅发1条后停止)
