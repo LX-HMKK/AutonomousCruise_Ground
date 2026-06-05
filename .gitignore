@@ -40,3 +40,4 @@ src/robot_slam/scripts/paraformer-zh/model.pt
 *.pth
 src/robot_slam/scripts/paraformer-zh/
 src/robot_slam/resources/_snowboydetect.so
+.catkin_workspace

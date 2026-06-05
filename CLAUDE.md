@@ -42,14 +42,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 用户说出 **"下机"/"我的远端使用时间结束"** 时，**必须**执行：
 1. 将远端 `~/abot_dev_ws/` 下所有本次修改的文件 `scp` 回本机 git 仓库对应位置
+<!-- 2. 删除远端 `~/abot_dev_ws/` 整个目录 -->
 2. 确认远端改动已同步到本地 git 仓库后告知用户
+<!-- 3. 确认 ABOT 上不留存本次开发代码后告知用户 -->
 
-> 远端 `~/abot_dev_ws/` 保留不删，便于下次直接上机使用。
+<!-- > 远端 `~/abot_dev_ws/` 保留不删，便于下次直接上机使用。 -->
 
 #### 禁止行为
 - **未经用户审查和明确同意，禁止向远端推送任何代码**
 - 禁止推送临时修改、未经 WSL 仿真验证的补丁
 - **禁止触碰 ABOT 原厂 `~/abot_ws/`**
+<!-- - 禁止在远端保留本次开发的代码或配置（下机后必须清除） -->
+
+#### 远端实时监控
+
+用户启动远端导航测试时，使用 `nav_monitor.py` + `Monitor` 工具实时观察运行状态，主动诊断问题。
+
+**启动监控**：
+```bash
+# Monitor 命令 (filter 只推送告警和事件, 不推送 2s 心跳 status):
+ssh abot@<IP> 'source /opt/ros/melodic/setup.bash && source ~/abot_dev_ws/devel/setup.bash && rosrun robot_slam nav_monitor.py' 2>&1 | grep --line-buffered -E '"type": ?"(alert|event)"'
+```
+
+**监控脚本**：`src/robot_slam/scripts/nav_monitor.py`，订阅 8 个关键话题，输出 JSON 行流。每 2s 输出 `type: status`（心跳），事件/告警即时输出 `type: event|alert`。
+
+**诊断 → 措施映射**：
+
+| 告警码 | 根因 | 措施 |
+|--------|------|------|
+| `LIDAR_STALE` | 雷达掉线 | `ssh abot@IP "ls /dev/rplidar"` 检查设备；若不存在提醒用户检查 USB |
+| `AMCL_STALE` | 定位节点挂 | `ssh abot@IP "rosnode ping amcl"` 确认 |
+| `AMCL_DIVERGE` | 粒子群发散 | 重新发送 `/initialpose` 到当前位置 |
+| `NAV_STUCK` | 导航卡死 | 检查代价地图是否有残留障碍物；取消 goal 重发 |
+| `MAP_MISSING` | 地图未加载 | 检查 `map_server` 是否启动、yaml 路径是否正确 |
+| `NO_MOTION` | 底盘无响应 | 检查 `abot_driver` 是否运行、`/cmd_vel` 是否被订阅 |
+| `SAFETY` | 碰撞/急停 | 检查安全监控状态，确认是否需要人工介入 |
+| `STATE_STALE` | 状态机卡住 | 检查当前阶段超时原因（识别失败/导航超时等） |
+| `ODOM_STALE` | 里程计断流 | 检查 `robot_pose_ekf` 和 `odom_ekf` 节点 |
+| `NAV_FAIL` | 导航目标失败 | 根据当前位姿判断：重试 / 跳过该点 / 重新定位 |
 
 ## 构建与开发命令
 
