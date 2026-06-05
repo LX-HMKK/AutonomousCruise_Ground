@@ -518,6 +518,9 @@ class MissionStateMachine(object):
             return
 
         self._stop_robot()
+        # 到达后稳定等待，确保机器人完全停稳再拍照（避免运动模糊）
+        stabilize_s = self.mission_cfg.get('waits', {}).get('arrival_stabilize_s', 1.0)
+        rospy.sleep(stabilize_s)
         self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
 
     def _handle_recognize_task_image(self, phase):

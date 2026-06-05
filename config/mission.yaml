@@ -24,7 +24,7 @@ timeouts:
 
 # ---- 等待时长 (全部可调) ----
 waits:
-  arrival_stabilize_s: 0.2         # 导航到达后位姿稳定等待
+  arrival_stabilize_s: 0.8         # 导航到达后位姿稳定等待（增加以消除运动模糊）
   vision_trigger_delay_s: 0.5      # 到达视觉点后停车等稳再触发VLM
   nav_poll_interval_s: 0.5         # 导航轮询间隔
   speak_hold_s: 0.5                # 播报前停稳时间
@@ -36,6 +36,11 @@ navigation:
   vision_yaw_tolerance_rad: 0.12   # 视觉点车头朝向容差，约 6.9°
   finish_xy_tolerance_m: 0.05      # 终点位置容差
   finish_yaw_tolerance_rad: 0.20   # 终点朝向容差，终点不要求精准朝向
+
+# ---- 任务点验证 ----
+target_cells:
+  valid: [31, 32, 33, 40, 41, 42, 49, 50, 51]
+  description: "VLM 返回的目标点必须在此列表中，否则视为识别失败"
 
 # ---- 识别置信度 ----
 confidence:

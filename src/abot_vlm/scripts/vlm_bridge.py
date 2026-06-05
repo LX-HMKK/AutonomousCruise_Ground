@@ -118,9 +118,35 @@ class VlmBridge(object):
         cv2.imwrite(img_path, img_bgr)
         rospy.loginfo('[VLM] Image saved: %s', img_path)
 
+        # 亮度检查：过暗/过曝时 warn（帮助诊断现场问题，不阻断流程）
+        mean_brightness = img_bgr.mean()
+        if mean_brightness < 10.0:
+            rospy.logwarn('[VLM] Image very dark (mean=%.1f), possible camera/lens cap issue', mean_brightness)
+        elif mean_brightness > 245.0:
+            rospy.logwarn('[VLM] Image overexposed (mean=%.1f), possible glare', mean_brightness)
+
+        # 保存调试图像（带时间戳，不覆盖，便于赛后回溯）
+        debug_dir = os.path.join(os.path.dirname(img_path), 'debug')
+        try:
+            if not os.path.isdir(debug_dir):
+                os.makedirs(debug_dir)
+            debug_img = os.path.join(debug_dir, '{}.jpg'.format(img_id))
+            cv2.imwrite(debug_img, img_bgr)
+            rospy.loginfo('[VLM] Debug image: %s', debug_img)
+        except Exception:
+            pass
+
         # 调用 worker (py3.9)
         rospy.loginfo('[VLM] Calling worker...')
         result = call_worker(img_path, self.prompt, img_id)
+
+        # 保存调试响应
+        try:
+            debug_resp = os.path.join(debug_dir, '{}_response.json'.format(img_id))
+            with open(debug_resp, 'w') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
         # 发布结果
         payload = json.dumps(result, ensure_ascii=False)

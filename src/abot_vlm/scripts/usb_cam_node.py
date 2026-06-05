@@ -66,6 +66,17 @@ def main():
         rospy.logerr('[usb_cam] 无法打开摄像头 device=%s, 检查 /dev/video* 与权限', str(device))
         return
 
+    # 暖机：丢弃前几帧（USB 摄像头刚打开时帧可能全黑/曝光未稳定）
+    warmup_frames = 5
+    warmup_mean = 0.0
+    for i in range(warmup_frames):
+        ret, _ = cap.read()
+        if ret:
+            warmup_mean += 1.0
+    warmup_ok = warmup_mean >= (warmup_frames - 1)  # 至少 N-1 帧成功
+    if not warmup_ok:
+        rospy.logwarn('[usb_cam] 暖机期间仅成功 %d/%d 帧，图像可能异常', int(warmup_mean), warmup_frames)
+
     actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     rospy.loginfo('[usb_cam] 已打开 device=%s, 分辨率 %dx%d, 发布 %s @ %dHz',
