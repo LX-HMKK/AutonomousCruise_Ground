@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### M7+ — 远端 LiDAR 启动问题治理 (2026-06-05)
+
+#### Fixed
+- **LiDAR 电机不自动启动**：rplidar_ros 1.7.0 构造时调 `stopMotor()`，需显式 `startScan()` 才启电机。新建 `start_lidar_motor.py` 防御节点，在 rplidarNode 就绪后自动调用 `/start_motor`
+- **rplidarNode 同名冲突循环杀**：`rplidar.launch` 中 `respawn="true"` 配合竞争未清理的旧 roslaunch，导致多个同名节点互相顶替、电机状态丢失。去掉 `respawn` 与官方一致
+- **udev 规则语法错误**：`/etc/udev/rules.d/rplidar.rules` 缺引号且 `ENV{ID_PATH}` 匹配阶段不可用，`/dev/rplidar` 从未创建。改用 `ATTRS{idVendor/idProduct}` 修复
+- **旧进程残留**：`competition.sh` SSH 模式新增启动前 `pkill` + 端口等待清理，杜绝多 setsid 实例并存
+- **VLM 识别重试过多**：`perception_retry_limit` 3→1，省 token
+
+#### Changed
+- `rplidar.launch`：串口路径改为 `/dev/rplidar`（对标参考实现）；去掉 `respawn="true"`
+- `competition.sh`：SSH 模式新增进程清理段；删除冗余 `/start_motor` 重试循环
+- `competition_field.yaml`：视觉点 `offset_m` 0.20→0.35m（靠后拍照）
+- `mission.yaml`：`perception_retry_limit` 3→1；`max_pos_std_m` 0.8m（放宽定位阈值）
+
+#### Added
+- `start_lidar_motor.py`：等待 `/start_motor` 服务就绪后调用一次即退出，作为 rplidar.launch 子节点
+
 ### M7+ — 语音 ASR 极速版接入 (2026-06-05)
 
 #### Changed

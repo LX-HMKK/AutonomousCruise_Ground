@@ -115,6 +115,16 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
 
 elif [ -n "$SSH_CONNECTION" ] || ! command -v gnome-terminal >/dev/null 2>&1; then
     # ===== SSH 后台模式 (无 GNOME 桌面) =====
+    echo "[SSH] 清理旧进程..."
+    pkill -f 'roscore|roslaunch|rosrun|rplidarNode|move_base|amcl|mission_state_machine|safety_monitor|doubao_tts|top_view_shot_node|usb_cam_node' 2>/dev/null || true
+    sleep 3
+    # 确保 ROS master 端口释放
+    while lsof -ti:11311 >/dev/null 2>&1; do
+        echo "  等待端口 11311 释放..."
+        sleep 1
+    done
+    rm -f /tmp/comp_*.log
+
     echo "[SSH] 后台启动 (模式: ${MODE_NAME})..."
     setsid bash -c "
         # Python: /usr/bin first → python=py2.7(ROS); anaconda py39 在 PATH 供 worker 显式调用
