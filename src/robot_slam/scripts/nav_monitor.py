@@ -165,15 +165,17 @@ class NavMonitor(object):
     def _cb_status(self, msg):
         if msg.status_list:
             s = msg.status_list[-1]
+            prev_status = self.nav_status
             self.nav_status = s.status
             self.nav_status_text = s.text
-            # 导航结果
-            if s.status == 3:  # SUCCEEDED
-                self._emit('event', 'NAV_DONE', 'Goal reached')
-                self.goal_active = False
-            elif s.status in (4, 5, 9):  # ABORTED, REJECTED, LOST
-                self._emit('alert', 'NAV_FAIL', 'Goal failed (status={}): {}'.format(s.status, s.text))
-                self.goal_active = False
+            # 导航结果 — 只在状态变化时触发，避免重复刷屏
+            if s.status != prev_status:
+                if s.status == 3:  # SUCCEEDED
+                    self._emit('event', 'NAV_DONE', 'Goal reached')
+                    self.goal_active = False
+                elif s.status in (4, 5, 9):  # ABORTED, REJECTED, LOST
+                    self._emit('alert', 'NAV_FAIL', 'Goal failed (status={}): {}'.format(s.status, s.text))
+                    self.goal_active = False
 
     def _cb_safety(self, msg):
         self.t_safety = now()

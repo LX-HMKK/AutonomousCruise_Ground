@@ -48,6 +48,16 @@ export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e 's|/home/abot/anaconda
 export DISPLAY=:0
 export XAUTHORITY=/run/user/1000/gdm/Xauthority
 
+# ============================================
+# ROS 网络环境锁定（修复 SSH 多会话 master 不可达）
+# 问题: 不同 SSH 会话默认 ROS_MASTER_URI 不一致，roslaunch 找不到
+#       master 就自启 roscore，导致多个 rosmaster 共存、节点互相不可见。
+# 修复: 显式绑定 localhost:11311，roslaunch 不再自启 roscore。
+# 监控侧同步使用 localhost 确保话题/服务可达。
+# ============================================
+export ROS_MASTER_URI=http://localhost:11311
+export ROS_HOSTNAME=localhost
+
 # 清理旧进程
 echo "=== 清理旧进程 ==="
 killall -9 roslaunch roscore rosmaster rosout 2>/dev/null || true
