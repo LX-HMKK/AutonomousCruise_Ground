@@ -9,6 +9,8 @@
     <rosparam file="$(find robot_slam)/params/carto/dwa_local_planner_params.yaml" command="load" />
     <rosparam file="$(find robot_slam)/params/carto/move_base_params.yaml" command="load" />
     <rosparam file="$(find robot_slam)/params/carto/global_planner_params.yaml" command="load" />
+    <!-- 比赛参数覆盖：config/navigation.yaml 是导航全部参数的单源真理，放在最后覆盖 carto 默认值 -->
+    <rosparam file="$(find mission_manager)/../../config/navigation.yaml" command="load" />
     <remap from="/cmd_vel" to="/cmd_vel" />
     <remap from="/odom" to="/odom" />
   </node>

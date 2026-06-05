@@ -996,10 +996,6 @@ class MissionStateMachine(object):
             rospy.logerr('[Mission] Max perception retries (%d) exceeded', max_retries)
             self.transition(MissionState.ABORT_PERCEPTION_FAILED)
             return
-        text = self.voice_cfg['voice_text']['task_image_failed'].format(index=phase)
-        self._speak(text)
-        if self._check_aborted():
-            return
         rospy.loginfo('[Mission] Perception retry %d/%d, re-navigating to vision position',
                       self.perception_retry_count, max_retries)
         self.recognition_in_progress = False
