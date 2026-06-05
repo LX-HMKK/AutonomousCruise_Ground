@@ -136,11 +136,14 @@ class SafetyMonitor(object):
             return
 
     def run(self):
-        """主循环：10 Hz 运行，持续检查超时。"""
+        """主循环：10 Hz 运行，持续检查超时。
+
+        注意：安全监控不在主循环中持续发布 /cmd_vel。
+        ESTOP 触发时 _emergency_stop() 已发送一次零速停车，
+        持续发布会与 move_base 竞争 /cmd_vel 导致车辆无法移动。
+        """
         rate = rospy.Rate(10)
         while not rospy.is_shutdown():
-            if self.estop_active:
-                self.cmd_vel_pub.publish(Twist())
             self.check_timeouts()
             if not self.estop_active:
                 self.status_pub.publish(String(data='OK'))

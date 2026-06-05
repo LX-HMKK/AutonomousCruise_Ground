@@ -3,7 +3,7 @@
 # 豆包/火山引擎 API 密钥
 
 # 方舟 Ark API Key (Chat/Vision 用)
-ARK_API_KEY = "apikey-20260605004702-hl2h5"
+ARK_API_KEY = "ark-75ae5f29-34b5-455c-8e74-2b40ef5ff22e-2e9cb"
 
 # 豆包语音 ASR/TTS (火山引擎语音控制台)
 SPEECH_TOKEN = "iFpeXcnPUfdwwl6oouL3OpvPgVoicBmW"

@@ -16,9 +16,12 @@
 
   <node pkg="mission_manager" type="mission_state_machine.py" name="mission_state_machine" output="screen">
     <param name="sim_mode" value="$(arg sim_mode)"/>
+    <remap from="/odom" to="/wheel_odom"/>
   </node>
 
   <node pkg="mission_manager" type="safety_monitor.py" name="safety_monitor" output="screen">
     <param name="heartbeat_timeout_s" value="10.0"/>  <!-- 放宽，避免 init 期间误判 -->
+    <param name="no_motion_timeout_s" value="60.0"/>  <!-- 给 DWA 足够时间从墙角生成速度 -->
+    <remap from="/odom" to="/wheel_odom"/>
   </node>
 </launch>

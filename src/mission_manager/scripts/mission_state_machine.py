@@ -91,8 +91,8 @@ class MissionStateMachine(object):
         MissionState.MANUAL_STOP_REQUESTED,
     }
 
-    TASK_PHASE_STEPS = ['SEARCH_TASK_IMAGE', 'RECOGNIZE_TASK_IMAGE',
-                        'NAVIGATE_TO_TASK', 'ARRIVE_TASK', 'ANNOUNCE_TASK']
+    TASK_PHASE_STEPS = ['SEARCH_TASK_IMAGE', 'NAVIGATE_TO_VISION',
+                        'RECOGNIZE_TASK_IMAGE', 'NAVIGATE_TO_TASK', 'ARRIVE_TASK', 'ANNOUNCE_TASK']
 
     def __init__(self, sim_mode=False):
         self.sim_mode = sim_mode
@@ -425,6 +425,8 @@ class MissionStateMachine(object):
 
         if current_step == 'SEARCH_TASK_IMAGE':
             self._handle_search_task_image(phase)
+        elif current_step == 'NAVIGATE_TO_VISION':
+            self._handle_navigate_to_vision(phase)
         elif current_step == 'RECOGNIZE_TASK_IMAGE':
             self._handle_recognize_task_image(phase)
         elif current_step == 'NAVIGATE_TO_TASK':
@@ -435,15 +437,10 @@ class MissionStateMachine(object):
             self._handle_announce_task(phase)
 
     def _handle_search_task_image(self, phase):
-        """导航到视觉读取位置。"""
+        """发送导航目标到视觉位置，然后切换到导航等待状态。"""
         vision_cells = self.field_cfg.get('vision_positions', [5, 37, 45, 77])
         vision_cell = vision_cells[phase - 1]
         x, y = get_cell_center_xy(vision_cell, self.field_cfg)
-
-        text = self.voice_cfg['voice_text']['task_image_searching'].format(index=phase)
-        self._speak(text)
-        if self._check_aborted():
-            return
 
         # 获取车头朝向 (对墙拍照)
         v2t = self.field_cfg.get('vision_to_task', {})
@@ -463,22 +460,34 @@ class MissionStateMachine(object):
         rospy.loginfo('[Mission] Phase %d: Navigating to vision position cell %d (%.3f, %.3f, yaw=%.2f)%s',
                       phase, vision_cell, x, y, yaw,
                       (' offset=%.2fm' % offset_m) if offset_m > 0 else '')
+
+        # 先发导航目标，再播 TTS — 让 move_base 提前开始规划
         self._stop_robot()
         self._send_nav_goal(x, y, yaw)
-        self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
+        self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_VISION'))
 
-    def _handle_recognize_task_image(self, phase):
-        """等待到达视觉位置 → 触发 VLM → 获取任务区号。"""
+        # TTS 放在 goal 之后：播报期间 _speak 会停车，但 move_base 已在后台规划，
+        # TTS 完成后无需额外等待即可开始运动
+        text = self.voice_cfg['voice_text']['task_image_searching'].format(index=phase)
+        self._speak(text)
+
+    def _handle_navigate_to_vision(self, phase):
+        """轮询等待机器人到达视觉位置，到达后切换到 RECOGNIZE。
+
+        与 _handle_recognize_task_image 拆分：导航归导航，识别归识别。
+        """
         timeout_s = self.mission_cfg['timeouts'].get('navigation_goal_timeout_s', 60)
         deadline = time.time() + timeout_s
+        arrived = False
 
-        # 轮询等待到达视觉位置
         while time.time() < deadline:
             if self._check_aborted():
                 self.move_base_client.cancel_goal()
                 return
             state = self.move_base_client.get_state()
             if state == GoalStatus.SUCCEEDED:
+                rospy.loginfo('[Mission] Phase %d: Vision position reached (move_base success)', phase)
+                arrived = True
                 break
             if self.last_nav_goal is not None:
                 nav_cfg = self.mission_cfg.get('navigation', {})
@@ -490,6 +499,7 @@ class MissionStateMachine(object):
                     rospy.loginfo('[Mission] Phase %d: Vision pose reached by tolerance before move_base success',
                                   phase)
                     self.move_base_client.cancel_goal()
+                    arrived = True
                     break
             if state in (GoalStatus.ABORTED, GoalStatus.REJECTED,
                          GoalStatus.RECALLED, GoalStatus.PREEMPTED, GoalStatus.LOST):
@@ -500,8 +510,18 @@ class MissionStateMachine(object):
             poll_interval = self.mission_cfg.get('waits', {}).get('nav_poll_interval_s', 1.0)
             rospy.sleep(poll_interval)
 
-        # 到达视觉位置，触发 mock VLM
+        if not arrived:
+            rospy.logwarn('[Mission] Phase %d: Nav to vision timed out (%.1fs), retrying',
+                          phase, timeout_s)
+            self.move_base_client.cancel_goal()
+            self._retry_perception(phase)
+            return
+
         self._stop_robot()
+        self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
+
+    def _handle_recognize_task_image(self, phase):
+        """机器人已到达视觉位置，触发 VLM 拍照识别，获取任务区号。"""
         trigger_delay = self.mission_cfg.get('waits', {}).get('vision_trigger_delay_s', 0.5)
         rospy.sleep(trigger_delay)
         self.recognition_in_progress = True
@@ -826,7 +846,7 @@ class MissionStateMachine(object):
 
     def _speak(self, text):
         """发送 TTS 播报，等待播报完成信号后返回。
-        播报期间机器人保持停止。仿真下 10s 超时，实车 20s 超时。"""
+        播报期间机器人保持停止。仿真下不等待 TTS 完成 (5s 超时)，避免阻塞导航。"""
         self._stop_robot()
         hold_s = self.mission_cfg['mission'].get('voice_static_hold_s', 0.5)
         rospy.sleep(hold_s)
@@ -844,13 +864,13 @@ class MissionStateMachine(object):
 
         rospy.loginfo('[Mission] TTS: %s', text)
 
-        # 等待 TTS 完成信号
-        timeout = 10.0 if self.sim_mode else 20.0
+        # sim 模式: 只发布语音文本, 不等待完成信号, 避免 TTS 超时阻塞导航
+        timeout = 0.5 if self.sim_mode else 20.0
         done = self.tts_done_event.wait(timeout)
         if done:
             rospy.loginfo('[Mission] TTS completed: %s', text[:30])
         else:
-            rospy.logwarn('[Mission] TTS timeout (%.1fs), proceeding anyway', timeout)
+            rospy.logwarn('[Mission] TTS not completed within %.1fs, proceeding', timeout)
 
         self._stop_robot()
 
