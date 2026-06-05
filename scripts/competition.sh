@@ -11,6 +11,9 @@
 #   用法: bash scripts/competition.sh game true
 #   节点: 同上但不启动 GameStart, 状态机 5s 后自动进入流程
 #
+# SSH 启动: 自动检测 SSH_TTY，使用 setsid 后台模式替代 GNOME 终端
+#   用法: ssh abot@IP 'bash ~/abot_dev_ws/scripts/competition.sh competition_field true'
+#
 # 数据流:
 #   game_node --/start--> mission_state_machine  (仅模式1)
 #   vlm_node  --/vision_result--> mission_state_machine
@@ -38,6 +41,23 @@ echo "========================================"
 export DISPLAY=:0
 export XAUTHORITY=/run/user/1000/gdm/Xauthority
 
+# ============================================
+# ROS 网络环境锁定
+# ============================================
+export ROS_MASTER_URI=http://localhost:11311
+export ROS_HOSTNAME=localhost
+
+# ===== 解释器隔离 (B3/B4) =====
+# 不砍 anaconda，只让 /usr/bin 排最前保证 python→py2.7，anaconda site-packages 保留可 import
+ENV_PY2='export PATH="/usr/bin:/opt/ros/melodic/bin:$PATH"'
+ENV_PY39='export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e "s#/home/abot/anaconda3[^:]*:##g" -e "s#:/home/abot/anaconda3[^:]*##g")"
+__PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anaconda3/envs/py39/bin/python3.9 "$__PY39SHIM/python3"; export PATH="$__PY39SHIM:$PATH"'
+
+READY_HELPERS='
+wait_master() { for i in $(seq 1 40); do timeout 2 rostopic list >/dev/null 2>&1 && return 0; sleep 1; done; echo "[warn] roscore 未就绪, 继续"; }
+wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/null | grep -qx "$1" && return 0; sleep 1; done; echo "[warn] 等待 $1 超时, 继续"; }
+'
+
 if grep -qi microsoft /proc/version 2>/dev/null; then
     # ===== WSL 仿真模式 =====
     echo "[WSL] 仿真后台启动..."
@@ -48,27 +68,27 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
     source /opt/ros/melodic/setup.bash
     source ${WS_PATH}/devel/setup.bash
 
-    # 1. 底盘 + 传感器层 (5 个节点)
+    # 1. 底盘 + 传感器层
     echo "[1/5] 启动底盘驱动..."
     roslaunch abot_bringup robot_with_imu.launch &
     sleep 5
 
-    # 2. 导航层 (4 个节点: map_server + AMCL + move_base)
+    # 2. 导航层
     echo "[2/5] 启动导航栈..."
     roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} &
     sleep 8
 
-    # 3. 唤醒词检测 (1 个节点)
+    # 3. 唤醒词检测
     echo "[3/5] 启动唤醒词检测..."
     roslaunch robot_slam GameStart.launch &
     sleep 2
 
-    # 4. VLM 图像识别 (1 个节点)
+    # 4. VLM 图像识别
     echo "[4/5] 启动 VLM 视觉识别..."
     roslaunch abot_vlm vlm_node.launch &
     sleep 2
 
-    # 5. 任务状态机 + 安全监控 (2 个节点)
+    # 5. 任务状态机 + 安全监控
     echo "[5/5] 启动任务状态机..."
     roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} &
     sleep 2
@@ -93,28 +113,63 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
 
     wait
 
+elif [ -n "$SSH_CONNECTION" ] || ! command -v gnome-terminal >/dev/null 2>&1; then
+    # ===== SSH 后台模式 (无 GNOME 桌面) =====
+    echo "[SSH] 后台启动 (模式: ${MODE_NAME})..."
+    setsid bash -c "
+        # Python: /usr/bin first → python=py2.7(ROS); anaconda py39 在 PATH 供 worker 显式调用
+        export PATH=\"/usr/bin:/opt/ros/melodic/bin:/home/abot/anaconda3/envs/py39/bin:\$PATH\"
+        source /opt/ros/melodic/setup.bash
+        source ${WS_PATH}/devel/setup.bash
+
+        echo '[1/5] roscore...'
+        roscore > /tmp/comp_roscore.log 2>&1 &
+        sleep 5
+
+        echo '[2/5] 底盘驱动...'
+        roslaunch abot_bringup robot_with_imu.launch > /tmp/comp_bringup.log 2>&1 &
+        sleep 12
+
+        echo '[3/5] 导航栈...'
+        roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} > /tmp/comp_nav.log 2>&1 &
+        sleep 15
+
+        echo '[3.5] 发送初始位姿...'
+        sleep 3
+        rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped \"{header: {frame_id: map}, pose: {pose: {position: {x: -1.6, y: 1.6, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}\"
+        # 等待 AMCL 收敛 (不阻塞: 最多等 10s)
+
+        echo '[4/5] VLM + TTS...'
+        roslaunch abot_vlm vlm_node.launch > /tmp/comp_vlm.log 2>&1 &
+        sleep 3
+        rosrun robot_slam doubao_tts.py > /tmp/comp_tts.log 2>&1 &
+        sleep 2
+
+        echo '[5/5] 状态机 + 安全...'
+        roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} > /tmp/comp_mission.log 2>&1 &
+
+        echo '=== 全部启动完成 ==='
+        rostopic list 2>/dev/null | wc -l | xargs -I{} echo '话题数: {}'
+        echo '日志: /tmp/comp_*.log'
+        while true; do sleep 60; done
+    " > /tmp/comp_startup.log 2>&1 &
+    disown
+    echo "后台已启动，等待节点就绪..."
+    sleep 35
+    source /opt/ros/melodic/setup.bash
+    source ${WS_PATH}/devel/setup.bash
+    echo ""
+    echo "=== 节点 ==="
+    timeout 3 rosnode list 2>/dev/null || echo "(等待中...)"
+    echo ""
+    echo "=== 关键话题 ==="
+    timeout 3 rostopic list 2>/dev/null | grep -E "/scan_filtered|/amcl_pose|/map\b|/vision_result|/voiceWords|/tts_done|/mission_state" || echo "(等待中...)"
+    echo ""
+    echo "========================================"
+    [ "${SIM_MODE}" = "false" ] && echo "说出'开始比赛'启动..." || echo "模式3: 5s 后自动开始. 监控: rosrun robot_slam nav_monitor.py"
+
 else
-    # ===== 实车模式：GNOME 终端分窗口 =====
-    # 用就绪检测替代固定 sleep, 消除启动时序竞态。
-    # 单引号定义 → 内部 $i/$1/$(seq) 不被父 shell 展开, 原样进入各窗口子 shell;
-    # timeout 包裹 rostopic list 防 XML-RPC 卡死; 超时仅告警继续, 不引入新的死等。
-    READY_HELPERS='
-wait_master() { for i in $(seq 1 40); do timeout 2 rostopic list >/dev/null 2>&1 && return 0; sleep 1; done; echo "[warn] roscore 未就绪, 继续"; }
-wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/null | grep -qx "$1" && return 0; sleep 1; done; echo "[warn] 等待 $1 超时, 继续"; }
-'
-
-    # ===== 解释器隔离 (B3/B4) =====
-    # 登录环境 .bashrc 把 anaconda py39 推到 PATH 最前, 导致 `python` 解析为 py3.9,
-    # 而 melodic 的 tf/cv2 C 扩展只为 py2.7 编译 → 状态机/底盘节点 import tf 崩。
-    # ENV_PY2: 剥离 anaconda, 使 `python`/`env python` → /usr/bin/python2.7 (有 rospy/cv2/tf)。
-    ENV_PY2='export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e "s#/home/abot/anaconda3[^:]*:##g" -e "s#:/home/abot/anaconda3[^:]*##g")"'
-    # ENV_PY39: 语音/VLM 窗口同时含 py2 节点(usb_cam_node.py, env python)与 py3 节点
-    # (doubao.py/doubao_asr.py/doubao_tts.py, env python3)。在剥 anaconda 基础上加一个只含
-    # python3→py39 的 shim 目录置于 PATH 首: 使 `env python3`→py39(有 Ark SDK/cv2/pyaudio),
-    # 而 `env python` 仍落到 /usr/bin/python2.7。两类 shebang 在同一窗口各得其所。
-    ENV_PY39='export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e "s#/home/abot/anaconda3[^:]*:##g" -e "s#:/home/abot/anaconda3[^:]*##g")"
-__PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anaconda3/envs/py39/bin/python3.9 "$__PY39SHIM/python3"; export PATH="$__PY39SHIM:$PATH"'
-
+    # ===== GNOME 桌面模式 (原有逻辑) =====
     # 窗口 1: roscore
     gnome-terminal -- bash -c '
         source /opt/ros/melodic/setup.bash
@@ -122,7 +177,7 @@ __PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anacon
         exec bash' &
     sleep 1
 
-    # 窗口 2: 底盘 + IMU + LiDAR + EKF + 模型 (5 个节点) — 等 roscore 就绪
+    # 窗口 2: 底盘 + IMU + LiDAR + EKF + 模型
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
@@ -133,7 +188,7 @@ __PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anacon
         exec bash" &
     sleep 1
 
-    # 窗口 3: 导航栈 — 等激光滤波话题就绪 (AMCL/costmap 依赖 /scan_filtered)
+    # 窗口 3: 导航栈
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
@@ -145,8 +200,7 @@ __PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anacon
         exec bash" &
     sleep 1
 
-    # 窗口 4: ASR 语音识别 (仅模式1) + VLM + TTS — 用就绪检测替代固定 sleep
-    # 该窗口含 py2(usb_cam_node.py) 与 py3(doubao*/asr/tts) 节点, 用 ENV_PY39 注入 py39 shim
+    # 窗口 4: ASR + VLM + TTS
     if [ "${SIM_MODE}" = "false" ]; then
         gnome-terminal -- bash -c "
             source /opt/ros/melodic/setup.bash
@@ -174,8 +228,7 @@ __PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anacon
     fi
     sleep 1
 
-    # 窗口 5: 任务状态机 + 安全监控 — 等 move_base 起来 (状态机要连 move_base action)
-    # 状态机/safety import tf → 必须 py2.7
+    # 窗口 5: 状态机 + 安全
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
@@ -187,7 +240,7 @@ __PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anacon
         exec bash" &
     sleep 1
 
-    # 窗口 6: RViz 可视化 (可选) — 等 roscore 就绪
+    # 窗口 6: RViz
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
