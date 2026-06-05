@@ -17,7 +17,7 @@ sensors:
     topic: "/scan_filtered"
     frame: "laser_link"
   camera:
-    resolution: "1080p"
+    resolution: "1920x1080"
     max_fps: 120
     fov_deg: 120
     topic: "/usb_cam/image_raw"

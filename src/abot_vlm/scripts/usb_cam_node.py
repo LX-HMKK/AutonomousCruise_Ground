@@ -82,6 +82,10 @@ def main():
     rospy.loginfo('[usb_cam] 已打开 device=%s, 分辨率 %dx%d, 发布 %s @ %dHz',
                   str(device), actual_w, actual_h, topic, fps)
 
+    if actual_w != width or actual_h != height:
+        rospy.logwarn('[usb_cam] 请求 %dx%d, 实际 %dx%d — 摄像头不支持请求分辨率!',
+                      width, height, actual_w, actual_h)
+
     rate = rospy.Rate(fps)
     fail_count = 0
     while not rospy.is_shutdown():

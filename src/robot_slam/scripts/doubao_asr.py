@@ -30,7 +30,7 @@ ASR_RESOURCE_ID = "volc.bigasr.auc_turbo"
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK = 1024
-RECORD_SECONDS = 4
+RECORD_SECONDS = 3  # was 4
 FORMAT = pyaudio.paInt16
 
 
@@ -64,6 +64,16 @@ class DoubaoASR(object):
         rospy.loginfo('[DoubaoASR] Ready. instance=%s api_resource=%s appid=%s',
                       self.resource_id, ASR_RESOURCE_ID, self.appid)
 
+        # 麦克风可用性检查
+        try:
+            dev_count = pyaudio.PyAudio().get_device_count()
+            if dev_count < 2:
+                rospy.logwarn('[DoubaoASR] Audio devices: %d (expected >=2); ASR may fail', dev_count)
+            else:
+                rospy.loginfo('[DoubaoASR] Audio devices: %d OK', dev_count)
+        except Exception as e:
+            rospy.logwarn('[DoubaoASR] Cannot enumerate audio devices: %s', e)
+
     def run(self):
         rate = rospy.Rate(0.5)
         while not rospy.is_shutdown():
@@ -73,7 +83,7 @@ class DoubaoASR(object):
             try:
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
                     tmp_path = f.name
-                record_audio(tmp_path, duration=3)
+                record_audio(tmp_path, duration=RECORD_SECONDS)
                 result = self._recognize(tmp_path)
                 os.unlink(tmp_path)
 
@@ -100,7 +110,7 @@ class DoubaoASR(object):
             headers = {
                 'X-Api-App-Key': self.appid,
                 'X-Api-Access-Key': self.token,
-                'X-Api-Resource-Id': ASR_RESOURCE_ID,
+                'X-Api-Resource-Id': self.resource_id,
                 'X-Api-Request-Id': str(_uuid.uuid4()),
                 'X-Api-Sequence': '-1',
                 'Content-Type': 'application/json',

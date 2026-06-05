@@ -27,23 +27,23 @@
     <!-- translation std dev, m -->
     <param name="odom_alpha3" value="0.2"/>
     <param name="odom_alpha4" value="0.2"/>
-    <param name="laser_z_hit" value="0.5"/>
+    <param name="laser_z_hit" value="0.9"/>
     <param name="laser_z_short" value="0.05"/>
     <param name="laser_z_max" value="0.05"/>
-    <param name="laser_z_rand" value="0.5"/>
+    <param name="laser_z_rand" value="0.05"/>
     <param name="laser_sigma_hit" value="0.2"/>
     <param name="laser_lambda_short" value="0.1"/>
     <param name="laser_model_type" value="likelihood_field"/>
     <!-- <param name="laser_model_type" value="beam"/> -->
     <param name="laser_likelihood_max_dist" value="2.0"/>
-    <param name="update_min_d" value="0.25"/>
+    <param name="update_min_d" value="0.1"/>
     <param name="update_min_a" value="0.2"/>
     <param name="odom_frame_id" value="odom"/>
     <param name="resample_interval" value="1"/>
     <!-- Increase tolerance because the computer can get quite busy -->
     <param name="transform_tolerance" value="1.0"/>
-    <param name="recovery_alpha_slow" value="0.0"/>
-    <param name="recovery_alpha_fast" value="0.0"/>
+    <param name="recovery_alpha_slow" value="0.001"/>
+    <param name="recovery_alpha_fast" value="0.1"/>
     <remap from="scan" to="$(arg scan_topic)"/>
   </node>
 </launch>

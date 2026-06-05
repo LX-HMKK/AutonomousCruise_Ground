@@ -37,7 +37,7 @@ task_image_mapping:
   mappings: []
 
 camera:
-  capture_width: 640
-  capture_height: 480
+  capture_width: 1920
+  capture_height: 1080
   save_images: true
   save_path: "logs/"

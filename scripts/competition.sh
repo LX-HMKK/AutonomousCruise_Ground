@@ -352,21 +352,28 @@ sleep 15
 
 # [3.5] 里程计 relay: robot_pose_ekf 发布 /robot_pose_ekf/odom_combined 而非 /odom。
 # safety_monitor / mission_state_machine / move_base 均订阅 /odom，需要桥接。
-echo '[3.5] 里程计 relay: /robot_pose_ekf/odom_combined -> /odom'
+echo '[3.5] 里程计 relay: /wheel_odom -> /odom'
 rosrun topic_tools relay /wheel_odom /odom > /tmp/comp_relay.log 2>&1 &
 track $!
 
+# [3.55] AMCL TF 桥接：用初始位姿引导 map->odom，后续订阅 /amcl_pose 动态更新
+echo '[3.55] AMCL TF 桥接 (map->odom)...'
+rosrun robot_slam amcl_tf_bridge.py > /tmp/comp_tf_bridge.log 2>&1 &
+track $!
+sleep 2
+
 # [3.6] 初始位姿 (比赛场地起点)
-echo '[3.6] 发送初始位姿 + map->odom TF...'
-sleep 3
+echo '[3.6] 发送初始位姿...'
+sleep 1
 rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped \
     "{header: {frame_id: map}, pose: {pose: {position: {x: -1.5, y: 1.5, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}" \
     > /tmp/comp_initpose.log 2>&1 || true
-# AMCL 1.16.7 有 bug: 收到 initialpose 后不发布 map->odom TF
-# 导致 map frame 不存在, move_base costmap 无法初始化, 车不动。
-# 用 static_transform_publisher 手动建立 map frame, 机器人完全靠 odometry 导航。
-/opt/ros/melodic/lib/tf/static_transform_publisher -1.5 1.5 0 0 0 0 1 map odom 100 &
-track $!
+# 等待 AMCL 接收激光并开始发布 /amcl_pose
+sleep 5
+for i in $(seq 1 20); do
+    timeout 2 rostopic echo -n 1 /amcl_pose > /dev/null 2>&1 && break
+    sleep 1
+done
 
 # [4] VLM + TTS
 echo '[4/5] VLM + TTS...'
@@ -377,10 +384,19 @@ rosrun robot_slam doubao_tts.py > /tmp/comp_tts.log 2>&1 &
 track $!
 sleep 2
 
-# [5] 语音唤醒（仅非 sim 模式，Snowboy 关键词"开始比赛"）
+# [5] 语音唤醒（仅非 sim 模式，豆包 ASR 检测"开始比赛"）
 if [ "${SIM_MODE}" = "false" ]; then
-    echo '[5/7] 语音唤醒 (Snowboy)...'
-    roslaunch robot_slam GameStart.launch > /tmp/comp_wakeup.log 2>&1 &
+    echo '[5/7] 语音唤醒 (豆包 ASR)...'
+    # 1) 播放提示音
+    ffplay -nodisp -autoexit \
+        ${WS_PATH}/src/robot_slam/scripts/start_record.mp3 \
+        > /tmp/comp_wakeup_prompt.log 2>&1 &
+    # 2) 启动豆包 ASR（需 py3.9 shim）
+    __PY39SHIM=/tmp/abot_py39_shim
+    mkdir -p "$__PY39SHIM"
+    ln -sf /home/abot/anaconda3/envs/py39/bin/python3.9 "$__PY39SHIM/python3"
+    PATH="$__PY39SHIM:$PATH" rosrun robot_slam doubao_asr.py \
+        > /tmp/comp_wakeup_asr.log 2>&1 &
     track $!
     sleep 3
 fi
