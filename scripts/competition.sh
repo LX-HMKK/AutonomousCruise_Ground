@@ -13,6 +13,7 @@
 #
 # SSH 启动: 自动检测 SSH_TTY，使用 setsid 后台模式替代 GNOME 终端
 #   用法: ssh abot@IP 'bash ~/abot_dev_ws/scripts/competition.sh competition_field true'
+#   停止: ssh abot@IP 'bash ~/abot_dev_ws/scripts/competition.sh --stop'
 #
 # 数据流:
 #   game_node --/start--> mission_state_machine  (仅模式1)
@@ -20,9 +21,99 @@
 #   mission_state_machine --/voiceWords--> doubao_tts → /tts_done
 #   mission_state_machine --move_base action--> 导航
 #   safety_monitor --/safety_status--> mission_state_machine
+#
+# 进程管理 (防僵尸进程):
+#   - trap EXIT INT TERM: 无论脚本因何退出，都会清理所有子进程
+#   - SIGTERM → sleep 3 → SIGKILL → pkill 兜底 (四层保障)
+#   - SSH 模式: 内层 setsid 脚本自带 trap，外层可通过 PID 文件精准停止
 # ============================================
 
 WS_PATH="${HOME}/abot_dev_ws"
+PIDFILE=/tmp/abot_competition.pid
+INNER_SCRIPT=/tmp/abot_competition_inner.sh
+
+# ============================================
+# PID 追踪与清理函数（全局可用）
+# ============================================
+TRACKED_PIDS=""
+
+track_pid() {
+    TRACKED_PIDS="$TRACKED_PIDS $1"
+}
+
+cleanup_all() {
+    local ts
+    ts=$(date '+%H:%M:%S' 2>/dev/null || echo "??:??:??")
+    echo "[$ts] [清理] 正在停止所有节点..."
+
+    # L1: SIGTERM 追踪的进程（让 roslaunch 有机会清理子节点）
+    for p in $TRACKED_PIDS; do
+        kill $p 2>/dev/null
+    done
+
+    # L2: 等 3 秒
+    sleep 3
+
+    # L3: SIGKILL 残留
+    for p in $TRACKED_PIDS; do
+        kill -9 $p 2>/dev/null
+    done
+
+    # L4: 兜底清扫（防止不属于追踪 PID 树的孤儿进程）
+    pkill -9 -f 'roscore'                2>/dev/null || true
+    pkill -9 -f 'rosmaster'              2>/dev/null || true
+    pkill -9 -f 'rosout'                 2>/dev/null || true
+    pkill -9 -f 'roslaunch'              2>/dev/null || true
+    pkill -9 -f 'rosrun'                 2>/dev/null || true
+    pkill -9 -f 'rplidarNode'            2>/dev/null || true
+    pkill -9 -f 'move_base'              2>/dev/null || true
+    pkill -9 -f 'amcl'                   2>/dev/null || true
+    pkill -9 -f 'mission_state_machine'  2>/dev/null || true
+    pkill -9 -f 'safety_monitor'         2>/dev/null || true
+    pkill -9 -f 'doubao_tts'             2>/dev/null || true
+    pkill -9 -f 'top_view_shot_node'     2>/dev/null || true
+    pkill -9 -f 'usb_cam_node'           2>/dev/null || true
+    pkill -9 -f 'start_lidar_motor'      2>/dev/null || true
+    pkill -9 -f 'lidar_loc'              2>/dev/null || true
+    pkill -9 -f 'robot_pose_ekf'         2>/dev/null || true
+    pkill -9 -f 'cmd_vel_smoother'       2>/dev/null || true
+    pkill -9 -f 'cmd_vel_mux'            2>/dev/null || true
+    pkill -9 -f 'cmd_vel_safety_guard'   2>/dev/null || true
+    pkill -9 -f 'identify_node'          2>/dev/null || true
+    pkill -9 -f 'llm_server'             2>/dev/null || true
+
+    rm -f "$PIDFILE"
+    echo "[$ts] [清理] 完成"
+}
+
+# 注意: trap 在各模式分支中按需注册，避免 SSH 模式下外层脚本退出时误杀内层进程
+
+# ============================================
+# --stop: 远端停止（通过 PID 文件精准 kill setsid 会话）
+# ============================================
+if [ "${1:-}" = "--stop" ]; then
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        echo "停止比赛进程 (PID: $PID)..."
+        kill $PID 2>/dev/null && echo "  已发送 SIGTERM"
+        sleep 3
+        kill -9 $PID 2>/dev/null && echo "  已发送 SIGKILL (强制)"
+        rm -f "$PIDFILE"
+        # 兜底清扫
+        pkill -9 -f 'roscore|rosmaster|rosout|roslaunch|rosrun|rplidarNode|move_base|amcl|mission_state_machine|safety_monitor' 2>/dev/null || true
+        pkill -9 -f 'doubao_tts|top_view_shot_node|usb_cam_node|start_lidar_motor|identify_node|llm_server' 2>/dev/null || true
+        echo "已停止"
+    else
+        echo "未找到运行中的比赛进程 (无 PID 文件: $PIDFILE)"
+        echo "尝试兜底清理..."
+        cleanup_all
+    fi
+    exit 0
+fi
+
+# ============================================
+# 参数解析
+# ============================================
 MAP_NAME="${1:-competition_field}"
 # 地图名不带 .yaml 则自动补全 (navigation.launch 的 map_server 需指向 .yaml 文件)
 [[ "$MAP_NAME" != *.yaml ]] && MAP_NAME="${MAP_NAME}.yaml"
@@ -36,6 +127,8 @@ echo "  ABOT 地面巡航 — ${MODE_NAME}"
 echo "========================================"
 echo "地图:     ${MAP_NAME}"
 echo "节点数:   $([ "${SIM_MODE}" = "true" ] && echo '11 (无唤醒词)' || echo '13')"
+echo "PID文件:  ${PIDFILE}"
+echo "停止命令: bash ${0} --stop"
 echo "========================================"
 
 export DISPLAY=:0
@@ -58,11 +151,19 @@ wait_master() { for i in $(seq 1 40); do timeout 2 rostopic list >/dev/null 2>&1
 wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/null | grep -qx "$1" && return 0; sleep 1; done; echo "[warn] 等待 $1 超时, 继续"; }
 '
 
+# ============================================
+# 环境检测
+# ============================================
 if grep -qi microsoft /proc/version 2>/dev/null; then
-    # ===== WSL 仿真模式 =====
+    # ============================================
+    # WSL 仿真模式
+    # ============================================
+    trap cleanup_all EXIT INT TERM
+
     echo "[WSL] 仿真后台启动..."
 
     roscore &
+    track_pid $!
     sleep 2
 
     source /opt/ros/melodic/setup.bash
@@ -71,26 +172,31 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
     # 1. 底盘 + 传感器层
     echo "[1/5] 启动底盘驱动..."
     roslaunch abot_bringup robot_with_imu.launch &
+    track_pid $!
     sleep 5
 
     # 2. 导航层
     echo "[2/5] 启动导航栈..."
     roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} &
+    track_pid $!
     sleep 8
 
     # 3. 唤醒词检测
     echo "[3/5] 启动唤醒词检测..."
     roslaunch robot_slam GameStart.launch &
+    track_pid $!
     sleep 2
 
     # 4. VLM 图像识别
     echo "[4/5] 启动 VLM 视觉识别..."
     roslaunch abot_vlm vlm_node.launch &
+    track_pid $!
     sleep 2
 
     # 5. 任务状态机 + 安全监控
     echo "[5/5] 启动任务状态机..."
     roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} &
+    track_pid $!
     sleep 2
 
     echo "========================================"
@@ -110,11 +216,36 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
         echo "仿真模式：发布 'sim_wakeup' 到 /start topic 触发比赛开始"
         echo "  rostopic pub /start std_msgs/String \"data: 'sim_wakeup'\""
     fi
+    echo ""
+    echo "Ctrl+C 停止所有节点"
 
-    wait
+    wait  # 等待所有后台进程; Ctrl+C → SIGINT → cleanup_all
 
 elif [ -n "$SSH_CONNECTION" ] || ! command -v gnome-terminal >/dev/null 2>&1; then
-    # ===== SSH 后台模式 (无 GNOME 桌面) =====
+    # ============================================
+    # SSH 后台模式 (无 GNOME 桌面)
+    #
+    # 架构：外层脚本写内层脚本到磁盘 → setsid 执行内层脚本 → 外层退出
+    # 内层脚本自带 trap，收到 SIGTERM 时清理所有节点
+    # 停止方式: bash competition.sh --stop (读取 PID 文件 kill setsid 会话)
+    # ============================================
+
+    # --- 外层陷阱：仅处理 Ctrl+C (SIGINT)，不处理 EXIT ---
+    # SIGINT: 用户在外层 sleep 期间按了 Ctrl+C → 杀 setsid 会话
+    # EXIT: 外层正常退出 → 不触发清理（内层脚本负责）
+    cleanup_outer() {
+        echo ""
+        echo "[外层] 收到中断信号，停止竞赛会话..."
+        if [ -f "$PIDFILE" ]; then
+            kill $(cat "$PIDFILE") 2>/dev/null || true
+        fi
+        # 短时等待内层 cleanup 生效
+        sleep 2
+        cleanup_all
+    }
+    # 注意: 不 trap SIGHUP — SSH 断连不应杀 setsid 会话（用户可能重连后用 --stop 管理）
+    trap cleanup_outer INT TERM
+
     echo "[SSH] 清理旧进程..."
     pkill -f 'roscore|roslaunch|rosrun|rplidarNode|move_base|amcl|mission_state_machine|safety_monitor|doubao_tts|top_view_shot_node|usb_cam_node' 2>/dev/null || true
     sleep 3
@@ -123,49 +254,146 @@ elif [ -n "$SSH_CONNECTION" ] || ! command -v gnome-terminal >/dev/null 2>&1; th
         echo "  等待端口 11311 释放..."
         sleep 1
     done
-    rm -f /tmp/comp_*.log
+    rm -f /tmp/comp_*.log "$INNER_SCRIPT" "$PIDFILE"
+
+    # --- 写入内层脚本（用 quoted heredoc 防外层变量展开） ---
+    cat > "$INNER_SCRIPT" << 'INNER_SCRIPT_END'
+#!/bin/bash
+# ============================================
+# 竞赛内层脚本 — 运行在 setsid 会话中
+# 自带 trap: 收到 SIGTERM 时清理所有节点
+# 参数: $1=MAP_NAME  $2=SIM_MODE  $3=WS_PATH
+# ============================================
+MAP_NAME="$1"
+SIM_MODE="$2"
+WS_PATH="$3"
+PIDFILE=/tmp/abot_competition.pid
+echo $$ > "$PIDFILE"
+
+PIDS=""
+track() { PIDS="$PIDS $1"; }
+
+# ---------- 内层清理 ----------
+inner_cleanup() {
+    local ts
+    ts=$(date '+%H:%M:%S' 2>/dev/null || echo "??:??:??")
+    echo "[$ts] [内层] 收到退出信号，清理所有节点..." | tee -a /tmp/comp_cleanup.log
+
+    # L1: SIGTERM 所有追踪进程
+    for p in $PIDS; do
+        kill $p 2>/dev/null
+    done
+
+    # L2: 等 3 秒
+    sleep 3
+
+    # L3: SIGKILL 残留
+    for p in $PIDS; do
+        kill -9 $p 2>/dev/null
+    done
+
+    # L4: 兜底（与外层 cleanup_all 保持同步）
+    pkill -9 -f 'roscore'                2>/dev/null || true
+    pkill -9 -f 'rosmaster'              2>/dev/null || true
+    pkill -9 -f 'rosout'                 2>/dev/null || true
+    pkill -9 -f 'roslaunch'              2>/dev/null || true
+    pkill -9 -f 'rosrun'                 2>/dev/null || true
+    pkill -9 -f 'rplidarNode'            2>/dev/null || true
+    pkill -9 -f 'move_base'              2>/dev/null || true
+    pkill -9 -f 'amcl'                   2>/dev/null || true
+    pkill -9 -f 'mission_state_machine'  2>/dev/null || true
+    pkill -9 -f 'safety_monitor'         2>/dev/null || true
+    pkill -9 -f 'doubao_tts'             2>/dev/null || true
+    pkill -9 -f 'top_view_shot_node'     2>/dev/null || true
+    pkill -9 -f 'usb_cam_node'           2>/dev/null || true
+    pkill -9 -f 'start_lidar_motor'      2>/dev/null || true
+    pkill -9 -f 'identify_node'          2>/dev/null || true
+    pkill -9 -f 'llm_server'             2>/dev/null || true
+    pkill -9 -f 'robot_pose_ekf'         2>/dev/null || true
+    pkill -9 -f 'cmd_vel_smoother'       2>/dev/null || true
+    pkill -9 -f 'cmd_vel_mux'            2>/dev/null || true
+    pkill -9 -f 'cmd_vel_safety_guard'   2>/dev/null || true
+
+    rm -f "$PIDFILE"
+    echo "[$ts] [内层] 清理完成" | tee -a /tmp/comp_cleanup.log
+}
+trap inner_cleanup EXIT INT TERM
+
+# ---------- PATH 设置 ----------
+export PATH="/usr/bin:/opt/ros/melodic/bin:/home/abot/anaconda3/envs/py39/bin:$PATH"
+export DISPLAY=:0
+export XAUTHORITY=/run/user/1000/gdm/Xauthority
+export ROS_MASTER_URI=http://localhost:11311
+export ROS_HOSTNAME=localhost
+
+source /opt/ros/melodic/setup.bash
+source "${WS_PATH}/devel/setup.bash"
+
+echo "[内层] === 竞赛启动 $(date '+%H:%M:%S') ==="
+echo "[内层] 地图: ${MAP_NAME}  模式: ${SIM_MODE}"
+
+# [1] roscore
+echo '[1/5] roscore...'
+roscore > /tmp/comp_roscore.log 2>&1 &
+track $!
+sleep 5
+
+# [2] 底盘驱动 (IMU + LiDAR + EKF)
+echo '[2/5] 底盘驱动...'
+roslaunch abot_bringup robot_with_imu.launch > /tmp/comp_bringup.log 2>&1 &
+track $!
+sleep 12
+
+# [3] 导航栈 (map_server + AMCL + move_base)
+echo '[3/5] 导航栈...'
+roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} > /tmp/comp_nav.log 2>&1 &
+track $!
+sleep 15
+
+# [3.5] 初始位姿 (比赛场地起点)
+echo '[3.5] 发送初始位姿...'
+sleep 3
+rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped \
+    "{header: {frame_id: map}, pose: {pose: {position: {x: -1.6, y: 1.6, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}" \
+    > /tmp/comp_initpose.log 2>&1 || true
+
+# [4] VLM + TTS
+echo '[4/5] VLM + TTS...'
+roslaunch abot_vlm vlm_node.launch > /tmp/comp_vlm.log 2>&1 &
+track $!
+sleep 3
+rosrun robot_slam doubao_tts.py > /tmp/comp_tts.log 2>&1 &
+track $!
+sleep 2
+
+# [5] 状态机 + 安全监控
+echo '[5/5] 状态机 + 安全...'
+roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} > /tmp/comp_mission.log 2>&1 &
+track $!
+
+echo "=== 全部启动完成 ($(date '+%H:%M:%S')) ==="
+timeout 3 rostopic list 2>/dev/null | wc -l | xargs -I{} echo "话题数: {}"
+echo "日志: /tmp/comp_*.log"
+echo "停止: bash ${WS_PATH}/scripts/competition.sh --stop"
+
+# 持续运行直到收到退出信号
+wait
+INNER_SCRIPT_END
+
+    chmod +x "$INNER_SCRIPT"
 
     echo "[SSH] 后台启动 (模式: ${MODE_NAME})..."
-    setsid bash -c "
-        # Python: /usr/bin first → python=py2.7(ROS); anaconda py39 在 PATH 供 worker 显式调用
-        export PATH=\"/usr/bin:/opt/ros/melodic/bin:/home/abot/anaconda3/envs/py39/bin:\$PATH\"
-        source /opt/ros/melodic/setup.bash
-        source ${WS_PATH}/devel/setup.bash
-
-        echo '[1/5] roscore...'
-        roscore > /tmp/comp_roscore.log 2>&1 &
-        sleep 5
-
-        echo '[2/5] 底盘驱动...'
-        roslaunch abot_bringup robot_with_imu.launch > /tmp/comp_bringup.log 2>&1 &
-        sleep 12
-
-        echo '[3/5] 导航栈...'
-        roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} > /tmp/comp_nav.log 2>&1 &
-        sleep 15
-
-        echo '[3.5] 发送初始位姿...'
-        sleep 3
-        rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped \"{header: {frame_id: map}, pose: {pose: {position: {x: -1.6, y: 1.6, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}\"
-        # 等待 AMCL 收敛 (不阻塞: 最多等 10s)
-
-        echo '[4/5] VLM + TTS...'
-        roslaunch abot_vlm vlm_node.launch > /tmp/comp_vlm.log 2>&1 &
-        sleep 3
-        rosrun robot_slam doubao_tts.py > /tmp/comp_tts.log 2>&1 &
-        sleep 2
-
-        echo '[5/5] 状态机 + 安全...'
-        roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} > /tmp/comp_mission.log 2>&1 &
-
-        echo '=== 全部启动完成 ==='
-        rostopic list 2>/dev/null | wc -l | xargs -I{} echo '话题数: {}'
-        echo '日志: /tmp/comp_*.log'
-        while true; do sleep 60; done
-    " > /tmp/comp_startup.log 2>&1 &
+    setsid bash "$INNER_SCRIPT" "$MAP_NAME" "$SIM_MODE" "$WS_PATH" > /tmp/comp_startup.log 2>&1 &
+    INNER_PID=$!
     disown
-    echo "后台已启动，等待节点就绪..."
+
+    echo "后台会话已启动 (PID: $INNER_PID)"
+    echo "内层脚本: $INNER_SCRIPT"
     sleep 35
+
+    # 取消外层 trap（让脚本可以安全退出）
+    trap - INT TERM
+
     source /opt/ros/melodic/setup.bash
     source ${WS_PATH}/devel/setup.bash
     echo ""
@@ -176,15 +404,24 @@ elif [ -n "$SSH_CONNECTION" ] || ! command -v gnome-terminal >/dev/null 2>&1; th
     timeout 3 rostopic list 2>/dev/null | grep -E "/scan_filtered|/amcl_pose|/map\b|/vision_result|/voiceWords|/tts_done|/mission_state" || echo "(等待中...)"
     echo ""
     echo "========================================"
-    [ "${SIM_MODE}" = "false" ] && echo "说出'开始比赛'启动..." || echo "模式3: 5s 后自动开始. 监控: rosrun robot_slam nav_monitor.py"
+    echo "  竞赛已后台运行"
+    echo "  停止命令: ssh abot@$(hostname -I 2>/dev/null | awk '{print $1}') 'bash ${WS_PATH}/scripts/competition.sh --stop'"
+    echo "  监控命令: ssh abot@$(hostname -I 2>/dev/null | awk '{print $1}') 'source /opt/ros/melodic/setup.bash && source ${WS_PATH}/devel/setup.bash && rosrun robot_slam nav_monitor.py'"
+    echo "========================================"
+    [ "${SIM_MODE}" = "false" ] && echo "说出'开始比赛'启动..." || echo "模式3: 5s 后自动开始. 监控日志: /tmp/comp_mission.log"
 
 else
-    # ===== GNOME 桌面模式 (原有逻辑) =====
+    # ============================================
+    # GNOME 桌面模式 (原有逻辑 + trap)
+    # ============================================
+    trap cleanup_all EXIT INT TERM
+
     # 窗口 1: roscore
     gnome-terminal -- bash -c '
         source /opt/ros/melodic/setup.bash
         roscore
         exec bash' &
+    track_pid $!
     sleep 1
 
     # 窗口 2: 底盘 + IMU + LiDAR + EKF + 模型
@@ -196,6 +433,7 @@ else
         wait_master
         roslaunch abot_bringup robot_with_imu.launch
         exec bash" &
+    track_pid $!
     sleep 1
 
     # 窗口 3: 导航栈
@@ -208,6 +446,7 @@ else
         wait_topic /scan_filtered 40
         roslaunch robot_slam navigation.launch map_name:=${MAP_NAME}
         exec bash" &
+    track_pid $!
     sleep 1
 
     # 窗口 4: ASR + VLM + TTS
@@ -236,6 +475,7 @@ else
             rosrun robot_slam doubao_tts.py &
             exec bash" &
     fi
+    track_pid $!
     sleep 1
 
     # 窗口 5: 状态机 + 安全
@@ -248,6 +488,7 @@ else
         wait_topic /move_base/status 60
         roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE}
         exec bash" &
+    track_pid $!
     sleep 1
 
     # 窗口 6: RViz
@@ -260,6 +501,8 @@ else
         wait_topic /map 30
         roslaunch robot_slam view_nav.launch
         exec bash" &
+    track_pid $!
+    sleep 1
 
     echo "========================================"
     echo "  6 个终端窗口已启动"
@@ -271,5 +514,9 @@ else
     echo "窗5: 任务状态机 + 安全监控"
     echo "窗6: RViz 可视化"
     echo ""
+    echo "关闭所有 GNOME 终端窗口即停止全部节点"
+    echo "或 Ctrl+C 触发全局清理"
     [ "${SIM_MODE}" = "false" ] && echo "说出'开始比赛'启动..." || echo "模式3: 5s 后自动开始"
+
+    wait
 fi

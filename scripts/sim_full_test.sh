@@ -1,11 +1,49 @@
 #!/bin/bash
 # WSL 完整比赛仿真测试
+# 用法: wsl bash scripts/sim_full_test.sh
+#
+# 进程管理:
+#   trap EXIT INT TERM 防僵尸进程 — 中断或异常退出时自动清理 roslaunch
 set -eu
 set -o pipefail
 
 WS="$HOME/abot_ws"
 LOG="/tmp/sim_full.log"
 SRC="/mnt/d/StudyWorks/3.2/MachineVision_Project/AutonomousCruise_Ground"
+PIDFILE="/tmp/sim_full.pid"
+
+# ============================================
+# 清理函数（四层保障: SIGTERM → sleep → SIGKILL → pkill）
+# ============================================
+cleanup() {
+    echo ""
+    echo "[清理] 停止仿真..."
+
+    # 先杀 roslaunch（会级联清理其子节点）
+    if [ -n "${SIM_PID:-}" ]; then
+        kill $SIM_PID 2>/dev/null || true
+    fi
+
+    # 等 roslaunch 清理
+    sleep 3
+
+    # SIGKILL 残留
+    if [ -n "${SIM_PID:-}" ]; then
+        kill -9 $SIM_PID 2>/dev/null || true
+    fi
+
+    # 兜底清扫
+    killall -9 rosmaster rosout roscore 2>/dev/null || true
+    killall -9 roslaunch rviz move_base amcl map_server 2>/dev/null || true
+    killall -9 sim_robot robot_state_publisher mock_vlm mock_tts 2>/dev/null || true
+    killall -9 mission_state_machine safety_monitor cartographer_node 2>/dev/null || true
+
+    rm -f "$PIDFILE"
+    echo "[清理] 完成"
+}
+trap cleanup EXIT INT TERM
+
+echo "$$" > "$PIDFILE"
 
 # ROS setup 脚本会读取未定义变量，source 时临时关闭 nounset。
 set +u
@@ -16,6 +54,7 @@ set -u
 # 从 mission.yaml 读取地图名
 MAP_NAME=$(python -c "import yaml; print(yaml.safe_load(open('$SRC/config/mission.yaml'))['mission']['map_name'])" 2>/dev/null || echo "competition_field")
 echo "=== ABOT 地面巡航 完整仿真 (地图: $MAP_NAME) ==="
+echo "Ctrl+C 停止并清理"
 START=$(date +%s)
 
 # 1. 清理
@@ -44,7 +83,7 @@ echo "  地图: $MAP_NAME  ($(head -1 "$WS"/src/robot_slam/maps/"$MAP_NAME".yaml
 # 3. 启动
 echo "[3/4] 启动仿真 (map_name=$MAP_NAME)..."
 roslaunch mission_manager sim_full_mission.launch map_name:="$MAP_NAME" > "$LOG" 2>&1 &
-PID=$!
+SIM_PID=$!
 
 # 等日志出现
 for i in $(seq 1 15); do
@@ -55,13 +94,25 @@ done
 # 等待仿真完成（最多 180s 比赛时间 + 启动 buffer）
 echo "  等待仿真运行..."
 TIMEOUT=200
+FINISHED=false
 for i in $(seq 1 $TIMEOUT); do
     sleep 1
     if grep -qE "DONE|ABORT" "$LOG" 2>/dev/null; then
         echo "  任务结束 (T+${i}s)"
+        FINISHED=true
+        break
+    fi
+    # 检查 roslaunch 是否还在运行（崩溃检测）
+    if ! kill -0 $SIM_PID 2>/dev/null; then
+        echo "  roslaunch 已退出 (T+${i}s)"
+        FINISHED=true
         break
     fi
 done
+
+if [ "$FINISHED" != "true" ]; then
+    echo "  超时 (${TIMEOUT}s)，强制停止"
+fi
 
 # 4. 报告
 echo ""
@@ -74,7 +125,5 @@ strings "$LOG" 2>/dev/null | grep -iE "ERROR|FATAL|Traceback" | grep -v "Unable"
 echo ""
 echo "完整日志: $LOG"
 
-# 停止
-kill $PID 2>/dev/null || true
-killall -9 rosmaster rosout 2>/dev/null || true
+# 清理由 trap 自动执行
 echo "已停止"

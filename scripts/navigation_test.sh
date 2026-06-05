@@ -5,6 +5,9 @@
 #   用法: bash navigation_test.sh [地图名] [路径脚本]
 #   节点: roscore + bringup(IMU) + nav(AMCL+map+move_base) + multi_goals + RViz
 #   无视觉/语音/唤醒词
+#
+# 进程管理:
+#   trap EXIT INT TERM 防僵尸进程 — Ctrl+C 或异常退出自动清理
 # ============================================
 
 WS_PATH="${HOME}/abot_dev_ws"
@@ -13,9 +16,52 @@ MAP_NAME="${1:-competition_field}"
 [[ "$MAP_NAME" != *.yaml ]] && MAP_NAME="${MAP_NAME}.yaml"
 GOALS_SCRIPT="${2:-nav_vision_goals.py}"
 
+# ============================================
+# PID 追踪与清理
+# ============================================
+TRACKED_PIDS=""
+
+track_pid() {
+    TRACKED_PIDS="$TRACKED_PIDS $1"
+}
+
+cleanup_all() {
+    echo ""
+    echo "[清理] 停止导航测试节点..."
+    # L1: SIGTERM
+    for p in $TRACKED_PIDS; do
+        kill $p 2>/dev/null
+    done
+    sleep 3
+    # L2: SIGKILL
+    for p in $TRACKED_PIDS; do
+        kill -9 $p 2>/dev/null
+    done
+    # L3: 兜底
+    pkill -9 -f 'roscore'           2>/dev/null || true
+    pkill -9 -f 'rosmaster'         2>/dev/null || true
+    pkill -9 -f 'rosout'            2>/dev/null || true
+    pkill -9 -f 'roslaunch'         2>/dev/null || true
+    pkill -9 -f 'rosrun'            2>/dev/null || true
+    pkill -9 -f 'rplidarNode'       2>/dev/null || true
+    pkill -9 -f 'move_base'         2>/dev/null || true
+    pkill -9 -f 'amcl'              2>/dev/null || true
+    pkill -9 -f 'map_server'        2>/dev/null || true
+    pkill -9 -f 'abot_driver'       2>/dev/null || true
+    pkill -9 -f 'abot_imu'          2>/dev/null || true
+    pkill -9 -f 'robot_pose_ekf'    2>/dev/null || true
+    pkill -9 -f 'rviz'              2>/dev/null || true
+    pkill -9 -f 'nav_vision_goals'  2>/dev/null || true
+    pkill -9 -f 'navigation_multi'  2>/dev/null || true
+    echo "[清理] 完成"
+}
+
+trap cleanup_all EXIT INT TERM
+
 echo "=== ABOT 预设路径导航测试 ==="
 echo "地图: ${MAP_NAME}"
 echo "路径脚本: ${GOALS_SCRIPT}"
+echo "Ctrl+C 停止并清理所有节点"
 
 # ============================================
 # 工作空间编译检查（铁律：只 source /opt/ros/melodic，禁止 source ~/abot_ws/）
@@ -65,18 +111,22 @@ sleep 2
 
 echo "=== 启动 roscore ==="
 roscore &
+track_pid $!
 sleep 4
 
 echo "=== 启动底盘驱动 ==="
 roslaunch abot_bringup robot_with_imu.launch &
+track_pid $!
 sleep 10
 
 echo "=== 启动导航栈 ==="
 roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} &
+track_pid $!
 sleep 12
 
 echo "=== 启动 RViz ==="
 rosrun rviz rviz -d ${WS_PATH}/src/robot_slam/rviz/view_navigation.rviz &
+track_pid $!
 sleep 3
 
 echo ""
@@ -103,4 +153,5 @@ sleep 2
 echo ""
 echo "=== 启动预设路径导航 ==="
 rosrun robot_slam ${GOALS_SCRIPT}
+# rosrun 前台运行，Ctrl+C 或脚本结束 → trap 清理
 wait
