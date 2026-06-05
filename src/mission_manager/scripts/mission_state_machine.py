@@ -106,9 +106,11 @@ class MissionStateMachine(object):
 
         # 状态机
         self.state = MissionState.IDLE
-        self.task_index = 0           # 当前任务序号 (0-3，共 4 个)
+        self.task_index = 0           # 当前序号 (0-3，共 4 个)
         self.target_cell = None        # 当前目标任务点网格号
         self.task_cells_done = []      # 已完成的任务点列表
+        self.vision_phase = True       # True=视觉采集阶段, False=任务执行阶段
+        self.collected_targets = []    # 视觉阶段收集的目标格子号列表
         self.state_start_time = time.time()
         self.mission_start_time = time.time()
         self.perception_retry_count = 0
@@ -405,6 +407,9 @@ class MissionStateMachine(object):
         self.logger.log_voice(text, 'start')
         self.task_index = 0
         self.perception_retry_count = 0
+        self.vision_phase = True
+        self.collected_targets = []
+        self.target_cell = None
         phase = self.task_index + 1
         self.transition(MissionState.task_image_state(phase, 'SEARCH_TASK_IMAGE'))
 
@@ -461,15 +466,12 @@ class MissionStateMachine(object):
                       phase, vision_cell, x, y, yaw,
                       (' offset=%.2fm' % offset_m) if offset_m > 0 else '')
 
-        # 先发导航目标，再播 TTS — 让 move_base 提前开始规划
+        # 先播报再发导航目标，语音与动作同步开始
+        text = self.voice_cfg['voice_text']['task_image_searching'].format(index=phase)
+        self._speak(text)
         self._stop_robot()
         self._send_nav_goal(x, y, yaw)
         self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_VISION'))
-
-        # TTS 放在 goal 之后：播报期间 _speak 会停车，但 move_base 已在后台规划，
-        # TTS 完成后无需额外等待即可开始运动
-        text = self.voice_cfg['voice_text']['task_image_searching'].format(index=phase)
-        self._speak(text)
 
     def _handle_navigate_to_vision(self, phase):
         """轮询等待机器人到达视觉位置，到达后切换到 RECOGNIZE。
@@ -548,7 +550,27 @@ class MissionStateMachine(object):
         self._speak(text)
         if self._check_aborted():
             return
-        self.transition(MissionState.task_image_state(phase, 'NAVIGATE_TO_TASK'))
+
+        # 视觉阶段：收集 target_cell，不立即导航
+        self.collected_targets.append(self.target_cell)
+        self.task_cells_done.append(self.target_cell)
+        rospy.loginfo('[Mission] Collected targets so far: %s', self.collected_targets)
+
+        if len(self.collected_targets) >= 4:
+            # 4 个视觉点全部完成，切换到任务执行阶段
+            self.vision_phase = False
+            self.task_index = 0
+            self.target_cell = self.collected_targets[0]
+            rospy.loginfo('[Mission] === Vision phase done, starting task execution: %s ===',
+                          self.collected_targets)
+            self.transition(MissionState.task_image_state(1, 'NAVIGATE_TO_TASK'))
+        else:
+            # 继续下一个视觉点
+            self.task_index += 1
+            next_phase = self.task_index + 1
+            self.target_cell = None
+            self.perception_retry_count = 0
+            self.transition(MissionState.task_image_state(next_phase, 'SEARCH_TASK_IMAGE'))
 
     def _handle_navigate_to_task(self, phase):
         self.footprint_retry_count = 0  # 新任务，重置 footprint 重试计数
@@ -695,7 +717,6 @@ class MissionStateMachine(object):
             else:
                 rospy.loginfo('[Mission] Phase %d: Footprint verified inside task region', phase)
 
-        self.task_cells_done.append(self.target_cell)
         rospy.loginfo('[Mission] Phase %d: Arrived at task point %d', phase, self.target_cell)
         self.transition(MissionState.task_image_state(phase, 'ANNOUNCE_TASK'))
 
@@ -706,16 +727,16 @@ class MissionStateMachine(object):
             return
         self.logger.log_voice(text, 'task_arrived')
 
-        task_count = self.mission_cfg['mission'].get('required_task_image_count', 4)
-        if self.task_index >= task_count - 1:  # task_index 是从 0 开始的
-            rospy.loginfo('[Mission] All 4 tasks done, heading to finish')
+        self.task_index += 1
+        if self.task_index >= len(self.collected_targets):
+            rospy.loginfo('[Mission] All %d tasks done, heading to finish', len(self.collected_targets))
             self.transition(MissionState.NAVIGATE_TO_FINISH)
         else:
-            self.task_index += 1
-            self.perception_retry_count = 0
+            self.target_cell = self.collected_targets[self.task_index]
             next_phase = self.task_index + 1
-            self.target_cell = None
-            self.transition(MissionState.task_image_state(next_phase, 'SEARCH_TASK_IMAGE'))
+            self.perception_retry_count = 0
+            rospy.loginfo('[Mission] Next task: cell=%d (phase %d)', self.target_cell, next_phase)
+            self.transition(MissionState.task_image_state(next_phase, 'NAVIGATE_TO_TASK'))
 
     # ========== Finish Phase Handlers ==========
 
@@ -848,16 +869,7 @@ class MissionStateMachine(object):
     # ========== Helpers ==========
 
     def _speak(self, text):
-        """发送 TTS 播报，等待播报完成信号后返回。
-        播报期间机器人保持停止。仿真下不等待 TTS 完成 (5s 超时)，避免阻塞导航。"""
-        self._stop_robot()
-        hold_s = self.mission_cfg['mission'].get('voice_static_hold_s', 0.5)
-        rospy.sleep(hold_s)
-
-        # 清除上一次的完成事件，记录本次播报文本用于匹配
-        self.tts_done_event.clear()
-        self._tts_pending = text
-
+        """发送 TTS 播报（非阻塞）。播报发布即返回，不等待 /tts_done。"""
         try:
             msg = String()
             msg.data = text
@@ -866,16 +878,6 @@ class MissionStateMachine(object):
             rospy.logerr('[Mission] TTS publish failed: %s', str(e))
 
         rospy.loginfo('[Mission] TTS: %s', text)
-
-        # sim 模式: 只发布语音文本, 不等待完成信号, 避免 TTS 超时阻塞导航
-        timeout = 0.5 if self.sim_mode else 20.0
-        done = self.tts_done_event.wait(timeout)
-        if done:
-            rospy.loginfo('[Mission] TTS completed: %s', text[:30])
-        else:
-            rospy.logwarn('[Mission] TTS not completed within %.1fs, proceeding', timeout)
-
-        self._stop_robot()
 
     def _stop_robot(self):
         """确保机器人完全停止。"""
