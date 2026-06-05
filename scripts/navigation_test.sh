@@ -17,14 +17,36 @@ echo "=== ABOT 预设路径导航测试 ==="
 echo "地图: ${MAP_NAME}"
 echo "路径脚本: ${GOALS_SCRIPT}"
 
-export DISPLAY=:0
-export XAUTHORITY=/run/user/1000/gdm/Xauthority
+# ============================================
+# 工作空间编译检查（铁律：只 source /opt/ros/melodic，禁止 source ~/abot_ws/）
+# ============================================
+if [ ! -f "${WS_PATH}/devel/setup.bash" ]; then
+    echo ""
+    echo "!!! 错误: ${WS_PATH}/devel/setup.bash 不存在！"
+    echo "!!! 请先编译开发工作空间（注意：禁止 source ~/abot_ws/）："
+    echo ""
+    echo "    source /opt/ros/melodic/setup.bash"
+    echo "    cd ${WS_PATH} && catkin_make"
+    echo ""
+    exit 1
+fi
 
-# 屏蔽 Anaconda，确保 ROS Python 2.7 环境
-export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e 's|/home/abot/anaconda3[^:]*:||g' -e 's|:/home/abot/anaconda3[^:]*||g')"
-
+# 检查关键包是否可找到
 source /opt/ros/melodic/setup.bash
 source ${WS_PATH}/devel/setup.bash
+for pkg in abot_model robot_slam abot_bringup lidar_filters; do
+    if ! rospack find $pkg > /dev/null 2>&1; then
+        echo "!!! 错误: 找不到 ROS 包 '$pkg'，请检查编译是否成功"
+        exit 1
+    fi
+done
+echo "  工作空间检查通过"
+
+# 重新设置 PATH（source 后可能被覆盖）
+export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e 's|/home/abot/anaconda3[^:]*:||g' -e 's|:/home/abot/anaconda3[^:]*||g')"
+
+export DISPLAY=:0
+export XAUTHORITY=/run/user/1000/gdm/Xauthority
 
 # 清理旧进程
 echo "=== 清理旧进程 ==="

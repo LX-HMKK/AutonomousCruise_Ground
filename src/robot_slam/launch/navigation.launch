@@ -3,10 +3,24 @@
 
   <arg name="map_name" default="my_lab.yaml" />
 
+  <!-- URDF 防御加载: bringup 侧 model.launch 通过 xacro 加载，此处 textfile 直接加载作为后备 -->
+  <param name="robot_description" textfile="$(find abot_model)/urdf/abot_model.urdf"/>
+
+  <!-- AMCL 初始位姿: 默认起点 cell 1 (西北角)。competition_field.yaml 网格约定:
+       x=(col-4)*0.4, y=(4-row)*0.4 → cell 1 (row0,col0) = (-1.6, 1.6), 车头朝场地内 yaw=0。
+       覆盖示例: roslaunch ... initial_pose_x:=-1.6 initial_pose_y:=1.6 initial_pose_a:=0 -->
+  <arg name="initial_pose_x" default="-1.6" />
+  <arg name="initial_pose_y" default="1.6" />
+  <arg name="initial_pose_a" default="0.0" />
+
   <node name="map_server" pkg="map_server" type="map_server" args="$(find robot_slam)/maps/$(arg map_name)"/>
 
   <include file="$(find robot_slam)/launch/include/move_base.launch.xml" />
 
-  <include file="$(find robot_slam)/launch/include/amcl.launch.xml" />
-  
+  <include file="$(find robot_slam)/launch/include/amcl.launch.xml">
+    <arg name="initial_pose_x" value="$(arg initial_pose_x)" />
+    <arg name="initial_pose_y" value="$(arg initial_pose_y)" />
+    <arg name="initial_pose_a" value="$(arg initial_pose_a)" />
+  </include>
+
 </launch>

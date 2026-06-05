@@ -45,7 +45,7 @@ confidence:
 # ---- 定位丢失监控 (仅实机有 /amcl_pose 时生效; 仿真用 odom 不触发) ----
 localization:
   monitor_enabled: true            # 是否启用 AMCL 定位发散监控
-  max_pos_std_m: 0.5               # 位置标准差阈值(m), 超过视为粒子群发散
+  max_pos_std_m: 0.8               # 位置标准差阈值(m), 超过视为粒子群发散 (实车站立起步 std~0.43m, 放宽容忍未运动收敛)
   max_yaw_std_rad: 0.5             # 朝向标准差阈值(rad)
-  lost_duration_s: 3.0             # 发散需持续多久才判定丢失(s), 防单次抖动误判
+  lost_duration_s: 6.0             # 发散需持续多久才判定丢失(s), 防单次抖动误判 (放宽容忍运动中短暂波动)
   amcl_stale_s: 3.0                # /amcl_pose 超过此时间无更新也视为定位异常(s)

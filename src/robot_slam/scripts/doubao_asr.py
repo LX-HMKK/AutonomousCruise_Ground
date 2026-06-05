@@ -79,7 +79,8 @@ class DoubaoASR(object):
 
                 if result and '开始比赛' in result:
                     rospy.loginfo('[DoubaoASR] "开始比赛" detected! → /start')
-                    self.start_pub.publish(String(data='wakeup'))
+                    # 状态机 _on_wakeup 在非仿真模式只认 data=='True'
+                    self.start_pub.publish(String(data='True'))
                     rospy.set_param('/start', True)
                     break
                 elif result:

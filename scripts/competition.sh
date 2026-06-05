@@ -19,8 +19,10 @@
 #   safety_monitor --/safety_status--> mission_state_machine
 # ============================================
 
-WS_PATH="${HOME}/abot_ws"
-MAP_NAME="${1:-game}"
+WS_PATH="${HOME}/abot_dev_ws"
+MAP_NAME="${1:-competition_field}"
+# 地图名不带 .yaml 则自动补全 (navigation.launch 的 map_server 需指向 .yaml 文件)
+[[ "$MAP_NAME" != *.yaml ]] && MAP_NAME="${MAP_NAME}.yaml"
 SIM_MODE="${2:-false}"  # false=模式1(唤醒词)  true=模式3(自动开始)
 
 MODE_NAME="模式1: 完整比赛"
@@ -101,6 +103,18 @@ wait_master() { for i in $(seq 1 40); do timeout 2 rostopic list >/dev/null 2>&1
 wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/null | grep -qx "$1" && return 0; sleep 1; done; echo "[warn] 等待 $1 超时, 继续"; }
 '
 
+    # ===== 解释器隔离 (B3/B4) =====
+    # 登录环境 .bashrc 把 anaconda py39 推到 PATH 最前, 导致 `python` 解析为 py3.9,
+    # 而 melodic 的 tf/cv2 C 扩展只为 py2.7 编译 → 状态机/底盘节点 import tf 崩。
+    # ENV_PY2: 剥离 anaconda, 使 `python`/`env python` → /usr/bin/python2.7 (有 rospy/cv2/tf)。
+    ENV_PY2='export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e "s#/home/abot/anaconda3[^:]*:##g" -e "s#:/home/abot/anaconda3[^:]*##g")"'
+    # ENV_PY39: 语音/VLM 窗口同时含 py2 节点(usb_cam_node.py, env python)与 py3 节点
+    # (doubao.py/doubao_asr.py/doubao_tts.py, env python3)。在剥 anaconda 基础上加一个只含
+    # python3→py39 的 shim 目录置于 PATH 首: 使 `env python3`→py39(有 Ark SDK/cv2/pyaudio),
+    # 而 `env python` 仍落到 /usr/bin/python2.7。两类 shebang 在同一窗口各得其所。
+    ENV_PY39='export PATH="/opt/ros/melodic/bin:$(echo "$PATH" | sed -e "s#/home/abot/anaconda3[^:]*:##g" -e "s#:/home/abot/anaconda3[^:]*##g")"
+__PY39SHIM=/tmp/abot_py39_shim; mkdir -p "$__PY39SHIM"; ln -sf /home/abot/anaconda3/envs/py39/bin/python3.9 "$__PY39SHIM/python3"; export PATH="$__PY39SHIM:$PATH"'
+
     # 窗口 1: roscore
     gnome-terminal -- bash -c '
         source /opt/ros/melodic/setup.bash
@@ -112,6 +126,7 @@ wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/nul
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
+        $ENV_PY2
         $READY_HELPERS
         wait_master
         roslaunch abot_bringup robot_with_imu.launch
@@ -122,6 +137,7 @@ wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/nul
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
+        $ENV_PY2
         $READY_HELPERS
         wait_master
         wait_topic /scan_filtered 40
@@ -130,10 +146,12 @@ wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/nul
     sleep 1
 
     # 窗口 4: ASR 语音识别 (仅模式1) + VLM + TTS — 用就绪检测替代固定 sleep
+    # 该窗口含 py2(usb_cam_node.py) 与 py3(doubao*/asr/tts) 节点, 用 ENV_PY39 注入 py39 shim
     if [ "${SIM_MODE}" = "false" ]; then
         gnome-terminal -- bash -c "
             source /opt/ros/melodic/setup.bash
             source ${WS_PATH}/devel/setup.bash
+            $ENV_PY39
             $READY_HELPERS
             wait_master
             rosrun robot_slam doubao_asr.py &
@@ -146,6 +164,7 @@ wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/nul
         gnome-terminal -- bash -c "
             source /opt/ros/melodic/setup.bash
             source ${WS_PATH}/devel/setup.bash
+            $ENV_PY39
             $READY_HELPERS
             wait_master
             roslaunch abot_vlm vlm_node.launch &
@@ -156,9 +175,11 @@ wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/nul
     sleep 1
 
     # 窗口 5: 任务状态机 + 安全监控 — 等 move_base 起来 (状态机要连 move_base action)
+    # 状态机/safety import tf → 必须 py2.7
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
+        $ENV_PY2
         $READY_HELPERS
         wait_master
         wait_topic /move_base/status 60
@@ -170,6 +191,7 @@ wait_topic() { for i in $(seq 1 ${2:-40}); do timeout 2 rostopic list 2>/dev/nul
     gnome-terminal -- bash -c "
         source /opt/ros/melodic/setup.bash
         source ${WS_PATH}/devel/setup.bash
+        $ENV_PY2
         $READY_HELPERS
         wait_master
         wait_topic /map 30

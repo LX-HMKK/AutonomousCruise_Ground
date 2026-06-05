@@ -12,8 +12,8 @@
 
   <!-- 3. 仿真机器人 (odom→base_footprint + map→odom TF, 围墙+挡板激光点云) -->
   <node pkg="mission_manager" type="sim_robot.py" name="sim_robot" output="screen">
-    <param name="init_x" value="-1.5"/>     <!-- cell 1 偏移 0.1m, 距墙 0.3m -->
-    <param name="init_y" value="1.5"/>
+    <param name="init_x" value="-1.6"/>     <!-- Cell 1 中心，与实车 /initialpose 一致 -->
+    <param name="init_y" value="1.6"/>
     <param name="init_yaw" value="0.0"/>
   </node>
 
