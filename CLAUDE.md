@@ -56,9 +56,17 @@ ssh abot@<IP> 'source /opt/ros/melodic/setup.bash && source ~/abot_dev_ws/devel/
 
 ### 上机
 用户说"上机"/"推送"/"远端测试"时：
-1. 整目录同步到 ABOT `~/abot_dev_ws/`（tar + ssh）
-2. 在远端 `catkin_make` 编译
+1. **增量同步**：仅 scp 变更的文件到 ABOT `~/abot_dev_ws/`（禁止全量 tar，减少耗时）
+2. 在远端 `catkin_make` 编译（仅 C++ 修改时需要；纯 Python 修改跳过）
 3. Source `~/abot_dev_ws/devel/setup.bash` 运行
+
+### 增量同步示例
+```bash
+# 单文件
+scp <本地路径> abot@<IP>:~/abot_dev_ws/<远端路径>
+# 多文件
+scp <本地路径1> <本地路径2> abot@<IP>:~/abot_dev_ws/<远端路径>/
+```
 
 ### 下机
 用户说"下机"/"远端使用时间结束"时：
