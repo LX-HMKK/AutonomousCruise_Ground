@@ -77,11 +77,9 @@ scp <本地路径1> <本地路径2> abot@<IP>:~/abot_dev_ws/<远端路径>/
 
 ### 下机
 用户说"下机"/"远端使用时间结束"时：
-1. 将远端 `~/abot_dev_ws/` 本次修改文件 `scp` 回本机
+1. 将远端 `~/abot_dev_ws/` 修改文件 `scp` 回本机
 2. 确认改动已同步后告知用户
-<!-- 2. 删除远端 `~/abot_dev_ws/` 整个目录 -->
-<!-- 3. 确认 ABOT 上不留存本次开发代码后告知用户 -->
-<!-- > 远端 `~/abot_dev_ws/` 保留不删，便于下次直接上机使用。 -->
+3. ABOT 公用 → 清远端源码（保留 devel/build 免重编译）：`ssh abot@<IP> 'rm -rf ~/abot_dev_ws/src ~/abot_dev_ws/config ~/abot_dev_ws/scripts ~/abot_dev_ws/launch'`
 
 ### 启动前检查
 - SSH 到 ABOT，`ps aux | grep ros` 确认无人占用
