@@ -588,7 +588,7 @@ class MissionStateMachine(object):
                       phase, self.target_cell, x, y)
 
         self._stop_robot()
-        self._send_nav_goal(x, y)
+        self._send_nav_goal(x, y, 0.0)
         self.logger.log_navigation(
             {'cell': self.target_cell, 'x': x, 'y': y}, None, True)
 
@@ -709,7 +709,10 @@ class MissionStateMachine(object):
                         self.state_start_time = time.time()
                         rospy.loginfo('[Mission] Phase %d: Footprint correction %d/%d',
                                       phase, self.footprint_retry_count, max_footprint_retries)
-                        self._send_nav_goal(cx, cy, ryaw)
+                        # Snap yaw to nearest valid orientation (0=east or π=west) for task region fit
+                        ryaw = math.atan2(math.sin(ryaw), math.cos(ryaw))  # normalize to [-π, π)
+                        target_yaw = 0.0 if abs(ryaw) < math.pi / 2 else math.pi
+                        self._send_nav_goal(cx, cy, target_yaw)
                         return
                     else:
                         rospy.logwarn('[Mission] Phase %d: Footprint retry limit reached (%d), accepting position',
@@ -743,14 +746,14 @@ class MissionStateMachine(object):
     def _handle_navigate_to_finish(self):
         finish_cell = self.field_cfg['finish_cell']
         x, y = get_cell_center_xy(finish_cell, self.field_cfg)
-        # 终点墙角偏移: 向场地中心方向退后，避免车体碰撞围墙
+        # 终点墙角偏移: 正值=向场地中心退, 负值=向墙角靠
         offset = self.field_cfg.get('finish_offset_m', 0.0)
-        if offset > 0:
+        if abs(offset) > 0.001:
             x -= offset * (1 if x > 0 else -1) if abs(x) > 0.01 else 0
             y -= offset * (1 if y > 0 else -1) if abs(y) > 0.01 else 0
         rospy.loginfo('[Mission] Navigating to finish cell %d (%.3f, %.3f)%s',
                       finish_cell, x, y,
-                      (' offset=%.2fm' % offset) if offset > 0 else '')
+                      (' offset=%.2fm' % offset) if abs(offset) > 0.001 else '')
 
         text = self.voice_cfg['voice_text']['navigating_to_finish']
         self._speak(text)
@@ -758,7 +761,9 @@ class MissionStateMachine(object):
             return
 
         self._stop_robot()
-        self._send_nav_goal(x, y)
+        # 终点朝向：保持自然进入 yaw（≈0/朝东），不强制转
+        finish_yaw = 0.0
+        self._send_nav_goal(x, y, finish_yaw)
         self.transition(MissionState.ARRIVE_FINISH)
 
     def _handle_arrive_finish(self):

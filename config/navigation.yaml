@@ -7,7 +7,6 @@
 # 调参指南:
 #   旋转太慢         → 增大 max_vel_theta / acc_lim_theta
 #   目标点附近抽搐   → 增大 xy_goal_tolerance / yaw_goal_tolerance
-#   路径箭头闪空白   → 增大 sim_time (>1.7)
 #   贴障碍物太近     → 增大 inflation_radius / occdist_scale
 #   路径绕远路       → 减小 inflation_radius / cost_scaling_factor
 #   末端来回震荡     → 增大 oscillation_reset_dist
@@ -65,7 +64,7 @@ DWAPlannerROS:
   acc_lim_y: 2.5              # 横移加速度
   acc_lim_theta: 4.0          # 旋转加速度 (rad/s²)
   # -- 到达判定 --
-  xy_goal_tolerance: 0.05     # 位置容差 (m)
+  xy_goal_tolerance: 0.03     # 位置容差 (m, 收紧确保终点完全入框)
   yaw_goal_tolerance: 0.03    # 朝向容差 (rad), ≈1.7° 提高旋转精度
   latch_xy_goal_tolerance: false
   # -- 轨迹模拟 --
@@ -83,7 +82,7 @@ DWAPlannerROS:
   stop_time_buffer: 0.2       # 碰撞前停车缓冲 (s)
   scaling_speed: 0.25
   max_scaling_factor: 0.2
-  oscillation_reset_dist: 0.05  # 移动超过此距离重置震荡检测
+  oscillation_reset_dist: 0.10  # 移动超过此距离重置震荡检测 (增大避免误判)
   publish_traj_pc: true         # 发布轨迹点云 (RViz 可视化)
   publish_cost_grid_pc: true    # 发布代价网格 (RViz 可视化)
   holonomic_robot: true         # 全向底盘 (麦克纳姆轮)

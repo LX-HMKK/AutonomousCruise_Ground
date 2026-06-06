@@ -8,42 +8,43 @@
 
   <node pkg="amcl" type="amcl" name="amcl" clear_params="true">
     <param name="use_map_topic" value="$(arg use_map_topic)"/>
-    <!-- 初始位姿: 仿真侧会传入正确起点, 实车默认(0,0)随后由 /initialpose 修正 -->
     <param name="initial_pose_x" value="$(arg initial_pose_x)"/>
     <param name="initial_pose_y" value="$(arg initial_pose_y)"/>
     <param name="initial_pose_a" value="$(arg initial_pose_a)"/>
-    <!-- Publish scans from best pose at a max of 10 Hz -->
     <param name="odom_model_type" value="omni"/>
     <param name="odom_alpha5" value="0.1"/>
     <param name="gui_publish_rate" value="10.0"/>
-    <param name="laser_max_beams" value="60"/>
-    <param name="laser_max_range" value="12.0"/>
-    <param name="min_particles" value="500"/>
-    <param name="max_particles" value="2000"/>
+    <!-- 激光: 5m 范围, 180 束均匀采样 -->
+    <param name="laser_max_beams" value="180"/>
+    <param name="laser_max_range" value="5.0"/>
+    <!-- 粒子: 小场地减少数量, 聚焦不散开 -->
+    <param name="min_particles" value="200"/>
+    <param name="max_particles" value="1000"/>
     <param name="kld_err" value="0.05"/>
     <param name="kld_z" value="0.99"/>
-    <param name="odom_alpha1" value="0.2"/>
-    <param name="odom_alpha2" value="0.2"/>
-    <!-- translation std dev, m -->
-    <param name="odom_alpha3" value="0.2"/>
-    <param name="odom_alpha4" value="0.2"/>
+    <!-- 里程计噪声: 收紧, 信任里程计 -->
+    <param name="odom_alpha1" value="0.1"/>
+    <param name="odom_alpha2" value="0.1"/>
+    <param name="odom_alpha3" value="0.1"/>
+    <param name="odom_alpha4" value="0.1"/>
+    <!-- 观测模型: 尖锐化匹配 -->
     <param name="laser_z_hit" value="0.9"/>
     <param name="laser_z_short" value="0.05"/>
     <param name="laser_z_max" value="0.05"/>
     <param name="laser_z_rand" value="0.05"/>
-    <param name="laser_sigma_hit" value="0.2"/>
+    <param name="laser_sigma_hit" value="0.15"/>
     <param name="laser_lambda_short" value="0.1"/>
     <param name="laser_model_type" value="likelihood_field"/>
-    <!-- <param name="laser_model_type" value="beam"/> -->
     <param name="laser_likelihood_max_dist" value="2.0"/>
-    <param name="update_min_d" value="0.1"/>
-    <param name="update_min_a" value="0.2"/>
+    <!-- 更新阈值: 放大防抖动, 移动 15cm 才更新 -->
+    <param name="update_min_d" value="0.15"/>
+    <param name="update_min_a" value="0.3"/>
     <param name="odom_frame_id" value="odom"/>
     <param name="resample_interval" value="1"/>
-    <!-- Increase tolerance because the computer can get quite busy -->
-    <param name="transform_tolerance" value="1.0"/>
-    <param name="recovery_alpha_slow" value="0.001"/>
-    <param name="recovery_alpha_fast" value="0.1"/>
+    <param name="transform_tolerance" value="0.3"/>
+    <!-- 恢复随机注入: 禁用, 防止粒子跳变 -->
+    <param name="recovery_alpha_slow" value="0.0"/>
+    <param name="recovery_alpha_fast" value="0.0"/>
     <remap from="scan" to="$(arg scan_topic)"/>
   </node>
 </launch>
