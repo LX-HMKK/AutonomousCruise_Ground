@@ -19,7 +19,7 @@ timeouts:
   perception_retry_limit: 1        # 识别失败最大重试次数 (省token，仅重试1次)
   navigation_retry_limit: 2        # 导航失败最大重试次数
   footprint_retry_limit: 2         # 到达后 footprint 修正次数，避免厘米级误差反复等待
-  navigation_goal_timeout_s: 30    # 单次导航超时
+  navigation_goal_timeout_s: 45    # 单次导航超时（横穿全场需考虑 DWA 振荡恢复）
   nav_stuck_timeout_s: 10.0        # 导航卡死检测 (位移<2cm且yaw变化<0.05rad)
 
 # ---- 等待时长 (全部可调) ----

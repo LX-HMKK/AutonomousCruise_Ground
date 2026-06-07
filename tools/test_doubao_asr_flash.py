@@ -103,7 +103,7 @@ class DoubaoASRFlashTest(unittest.TestCase):
             'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash')
         self.assertEqual(captured['headers']['X-Api-App-Key'], '5728482904')
         self.assertEqual(captured['headers']['X-Api-Access-Key'], 'test-token')
-        self.assertEqual(captured['headers']['X-Api-Resource-Id'], 'volc.bigasr.auc_turbo')
+        self.assertEqual(captured['headers']['X-Api-Resource-Id'], 'Speech_Recognition_Seed_AUC2000000786212863330')
         self.assertEqual(captured['headers']['X-Api-Sequence'], '-1')
         self.assertIn('X-Api-Request-Id', captured['headers'])
         self.assertEqual(captured['json']['user']['uid'], 'abot_robot')

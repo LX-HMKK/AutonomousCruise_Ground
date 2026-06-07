@@ -368,9 +368,9 @@ sleep 1
 rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped \
     "{header: {frame_id: map}, pose: {pose: {position: {x: -1.5, y: 1.5, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}" \
     > /tmp/comp_initpose.log 2>&1 || true
-# 等待 AMCL 接收激光并开始发布 /amcl_pose
-sleep 5
-for i in $(seq 1 20); do
+# 短等 AMCL（amcl_tf_bridge 已用初始位姿引导 map→odom，AMCL 收敛可异步）
+sleep 3
+for i in $(seq 1 3); do
     timeout 2 rostopic echo -n 1 /amcl_pose > /dev/null 2>&1 && break
     sleep 1
 done
@@ -384,14 +384,16 @@ rosrun robot_slam doubao_tts.py > /tmp/comp_tts.log 2>&1 &
 track $!
 sleep 2
 
-# [5] 语音唤醒（仅非 sim 模式，豆包 ASR 检测"开始比赛"）
+# [5] 状态机 + 安全监控（必须在 ASR 之前启动，确保 /start 订阅者就绪）
+echo '[5/7] 状态机 + 安全...'
+roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} > /tmp/comp_mission.log 2>&1 &
+track $!
+sleep 3
+
+# [6] 语音唤醒（仅非 sim 模式，豆包 ASR 检测"开始比赛"）
 if [ "${SIM_MODE}" = "false" ]; then
-    echo '[5/7] 语音唤醒 (豆包 ASR)...'
-    # 1) 播放提示音
-    ffplay -nodisp -autoexit \
-        ${WS_PATH}/src/robot_slam/scripts/start_record.mp3 \
-        > /tmp/comp_wakeup_prompt.log 2>&1 &
-    # 2) 启动豆包 ASR（需 py3.9 shim）
+    echo '[6/7] 语音唤醒 (豆包 ASR)...'
+    # 启动豆包 ASR（需 py3.9 shim），提示音由 ASR 节点内部播放
     __PY39SHIM=/tmp/abot_py39_shim
     mkdir -p "$__PY39SHIM"
     ln -sf /home/abot/anaconda3/envs/py39/bin/python3.9 "$__PY39SHIM/python3"
@@ -400,11 +402,6 @@ if [ "${SIM_MODE}" = "false" ]; then
     track $!
     sleep 3
 fi
-
-# [6] 状态机 + 安全监控
-echo '[6/7] 状态机 + 安全...'
-roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE} > /tmp/comp_mission.log 2>&1 &
-track $!
 
 # [7] RViz 可视化
 echo '[7] RViz...'
@@ -490,7 +487,20 @@ else
     track_pid $!
     sleep 1
 
-    # 窗口 4: ASR + VLM + TTS
+    # 窗口 4: 状态机 + 安全（必须在 ASR 前启动，确保 /start 订阅者就绪）
+    gnome-terminal -- bash -c "
+        source /opt/ros/melodic/setup.bash
+        source ${WS_PATH}/devel/setup.bash
+        $ENV_PY2
+        $READY_HELPERS
+        wait_master
+        wait_topic /move_base/status 60
+        roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE}
+        exec bash" &
+    track_pid $!
+    sleep 1
+
+    # 窗口 5: ASR + VLM + TTS
     if [ "${SIM_MODE}" = "false" ]; then
         gnome-terminal -- bash -c "
             source /opt/ros/melodic/setup.bash
@@ -498,6 +508,7 @@ else
             $ENV_PY39
             $READY_HELPERS
             wait_master
+            wait_topic /mission_heartbeat 30
             rosrun robot_slam doubao_asr.py &
             sleep 2
             roslaunch abot_vlm vlm_node.launch &
@@ -516,19 +527,6 @@ else
             rosrun robot_slam doubao_tts.py &
             exec bash" &
     fi
-    track_pid $!
-    sleep 1
-
-    # 窗口 5: 状态机 + 安全
-    gnome-terminal -- bash -c "
-        source /opt/ros/melodic/setup.bash
-        source ${WS_PATH}/devel/setup.bash
-        $ENV_PY2
-        $READY_HELPERS
-        wait_master
-        wait_topic /move_base/status 60
-        roslaunch mission_manager sim_mission.launch sim_mode:=${SIM_MODE}
-        exec bash" &
     track_pid $!
     sleep 1
 

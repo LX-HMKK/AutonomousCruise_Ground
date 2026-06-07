@@ -4,6 +4,7 @@
 
 豆包 ASR 使用火山引擎语音识别大模型极速版 HTTP API。
 认证: X-Api-App-Key + X-Api-Access-Key。
+录音: 使用 PulseAudio parec（支持蓝牙麦克风），不再依赖 pyaudio/ALSA。
 """
 
 import rospy
@@ -12,11 +13,11 @@ import sys
 import time
 import json
 import tempfile
-import pyaudio
 import wave
 import requests
 import base64
 import uuid as _uuid
+import subprocess
 from std_msgs.msg import String
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'abot_vlm', 'scripts'))
@@ -24,59 +25,82 @@ from API_KEY_DOUBAO import SPEECH_APPID, SPEECH_TOKEN, SPEECH_ASR_RESOURCE_ID
 
 # ---- ASR 配置 ----
 ASR_API_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"
-ASR_RESOURCE_ID = "volc.bigasr.auc_turbo"
 
 # ---- 录音参数 ----
-SAMPLE_RATE = 16000
+SAMPLE_RATE = 8000  # 蓝牙麦克风原生 8000Hz，16000 会被 PulseAudio 静音
 CHANNELS = 1
-CHUNK = 1024
 RECORD_SECONDS = 3  # was 4
-FORMAT = pyaudio.paInt16
+
+
+def _find_bluetooth_source():
+    """查找 PulseAudio 蓝牙麦克风源名称。"""
+    try:
+        out = subprocess.check_output(['pactl', 'list', 'short', 'sources'], stderr=subprocess.STDOUT)
+        for line in out.decode('utf-8').strip().split('\n'):
+            if 'bluez_source' in line:
+                name = line.split()[1]
+                rospy.loginfo('[DoubaoASR] Found BT source: %s', name)
+                return name
+    except Exception:
+        pass
+    return None
 
 
 def record_audio(filename, duration=RECORD_SECONDS):
-    """PyAudio 录音，保存为 WAV。"""
-    p = pyaudio.PyAudio()
-    stream = p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
-                    input=True, frames_per_buffer=CHUNK)
-    frames = []
-    for _ in range(int(SAMPLE_RATE / CHUNK * duration)):
-        frames.append(stream.read(CHUNK, exception_on_overflow=False))
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-    wf = wave.open(filename, 'wb')
-    wf.setnchannels(CHANNELS)
-    wf.setsampwidth(p.get_sample_size(FORMAT))
-    wf.setframerate(SAMPLE_RATE)
-    wf.writeframes(b''.join(frames))
-    wf.close()
+    """PulseAudio parec 录音（支持蓝牙麦克风），保存为 WAV。"""
+    bt_source = _find_bluetooth_source()
+    cmd = ['parec', '--format=s16le', '--rate={}'.format(SAMPLE_RATE),
+           '--channels={}'.format(CHANNELS), '--latency-msec=10']
+    if bt_source:
+        cmd += ['--device=' + bt_source]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    bytes_per_sec = SAMPLE_RATE * CHANNELS * 2  # 16-bit = 2 bytes
+    total_bytes = bytes_per_sec * duration
+    raw_data = b''
+    try:
+        while len(raw_data) < total_bytes:
+            chunk = proc.stdout.read(min(4096, total_bytes - len(raw_data)))
+            if not chunk:
+                break
+            raw_data += chunk
+    finally:
+        proc.terminate()
+        proc.wait()
+    with wave.open(filename, 'wb') as wf:
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(raw_data)
 
 
 class DoubaoASR(object):
     """豆包语音识别，检测比赛开始指令。"""
 
     def __init__(self):
-        self.start_pub = rospy.Publisher('/start', String, queue_size=10)
+        self.start_pub = rospy.Publisher('/start', String, queue_size=10, latch=True)
         self.appid = SPEECH_APPID
         self.token = SPEECH_TOKEN
         self.resource_id = SPEECH_ASR_RESOURCE_ID
-        rospy.loginfo('[DoubaoASR] Ready. instance=%s api_resource=%s appid=%s',
-                      self.resource_id, ASR_RESOURCE_ID, self.appid)
+        rospy.loginfo('[DoubaoASR] Ready. resource_id=%s appid=%s',
+                      self.resource_id, self.appid)
 
-        # 麦克风可用性检查
+        # PulseAudio 录音源检查
         try:
-            dev_count = pyaudio.PyAudio().get_device_count()
-            if dev_count < 2:
-                rospy.logwarn('[DoubaoASR] Audio devices: %d (expected >=2); ASR may fail', dev_count)
-            else:
-                rospy.loginfo('[DoubaoASR] Audio devices: %d OK', dev_count)
+            result = subprocess.check_output(['pactl', 'list', 'short', 'sources'], stderr=subprocess.STDOUT)
+            sources = [l for l in result.decode('utf-8').strip().split('\n') if l.strip()]
+            rospy.loginfo('[DoubaoASR] PulseAudio sources: %d OK', len(sources))
         except Exception as e:
-            rospy.logwarn('[DoubaoASR] Cannot enumerate audio devices: %s', e)
+            rospy.logwarn('[DoubaoASR] Cannot enumerate PulseAudio sources: %s', e)
 
     def run(self):
+        # 通过豆包 TTS 播提示音（TTS 在 step4 已启动，此时必然就绪）
+        tts_pub = rospy.Publisher('/voiceWords', String, queue_size=1)
+        rospy.sleep(0.3)  # 等 TTS 订阅连接
+        tts_pub.publish(String(data='请说开始比赛'))
+        rospy.sleep(1.5)  # 等 TTS 播完
         rate = rospy.Rate(0.5)
-        while not rospy.is_shutdown():
+        deadline = time.time() + 30  # 30 秒监听窗口
+        while not rospy.is_shutdown() and time.time() < deadline:
             if rospy.get_param('/start', False):
                 rospy.loginfo('[DoubaoASR] /start already set, exiting')
                 break
@@ -89,15 +113,17 @@ class DoubaoASR(object):
 
                 if result and '开始比赛' in result:
                     rospy.loginfo('[DoubaoASR] "开始比赛" detected! → /start')
-                    # 状态机 _on_wakeup 在非仿真模式只认 data=='True'
                     self.start_pub.publish(String(data='True'))
                     rospy.set_param('/start', True)
+                    rospy.sleep(0.5)
                     break
                 elif result:
                     rospy.loginfo('[DoubaoASR] Heard: %s', result[:60])
             except Exception as e:
                 rospy.logwarn('[DoubaoASR] %s', e)
             rate.sleep()
+        else:
+            rospy.loginfo('[DoubaoASR] 30s window expired, exiting')
 
     def _recognize(self, audio_path):
         """调用豆包语音识别大模型极速版 HTTP API。"""
@@ -132,8 +158,11 @@ class DoubaoASR(object):
             message = resp.headers.get('X-Api-Message', '')
             logid = resp.headers.get('X-Tt-Logid', '')
             if status_code != '20000000':
-                rospy.logwarn('[DoubaoASR] ASR failed: http=%d code=%s msg=%s logid=%s',
-                              resp.status_code, status_code, message, logid)
+                if status_code == '20000003':  # no valid speech — 静默监听期间正常
+                    rospy.logdebug('[DoubaoASR] Silence (no valid speech)')
+                else:
+                    rospy.logwarn('[DoubaoASR] ASR failed: http=%d code=%s msg=%s logid=%s',
+                                  resp.status_code, status_code, message, logid)
                 return None
 
             data = resp.json()
