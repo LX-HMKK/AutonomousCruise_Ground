@@ -32,6 +32,9 @@ ssh abot@<IP> 'bash ~/abot_dev_ws/scripts/competition.sh --stop'
 
 # 远端监控
 ssh abot@<IP> 'source /opt/ros/melodic/setup.bash && source ~/abot_dev_ws/devel/setup.bash && rosrun robot_slam nav_monitor.py'
+
+# ASR 语音识别测试（免 ROS 环境）
+python tools/test_doubao_asr_flash.py
 ```
 
 ## 环境
@@ -96,6 +99,8 @@ scp <本地路径1> <本地路径2> abot@<IP>:~/abot_dev_ws/<远端路径>/
 ```
 config/          # 比赛参数 YAML（禁止硬编码）
 scripts/         # 启动脚本（competition/mapping/navigation_test/sim_full_test）
+tools/           # 辅助工具（地图生成/标注、语音/ASR 测试）
+docs/            # 项目需求文档 + superpowers 设计规范/实施计划
 src/
 ├── mission_manager/  # 任务状态机 + 安全监控 + 仿真 mock
 ├── common/           # 公共工具
@@ -119,6 +124,9 @@ Angular 格式，中文消息：`<type>(<scope>): <简述>`。type: feat/fix/doc
 | 仿真唤醒等待 /start | `sim_mode=true` 下状态机 5s 自动唤醒 |
 | 起点在地图外 → AMCL 发散 | 检查 init_x/init_y 是否在 map 范围内 |
 | heartbeat 不执行 | `rospy.Timer(2s)` 独立线程，不要靠 rospy.spin |
+| AMCL 定位发散（全局地图漂移） | 用 `amcl_tf_bridge.py` 动态计算 `map→odom` TF 广播，时间戳对齐 AMCL header.stamp |
+| TF 旋转方向反 → 点云漂移 | `_invert_transform` 旋转公式 `conj(q)*(-t)*q`，不是 `q*(-t)*conj(q)` |
+| DWA 原地振荡不前进 | 增大 `osc_reset`（0.05→0.10），配合 `laser_max_range` 5m 减少盲区死锁 |
 
 ## 比赛约束
 

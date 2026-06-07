@@ -89,25 +89,75 @@ cleanup_all() {
 # 注意: trap 在各模式分支中按需注册，避免 SSH 模式下外层脚本退出时误杀内层进程
 
 # ============================================
-# --stop: 远端停止（通过 PID 文件精准 kill setsid 会话）
+# --stop: 远端停止（全覆盖 pkill + 端口验证，不依赖 PID 文件）
 # ============================================
 if [ "${1:-}" = "--stop" ]; then
+    echo "=== 停止所有比赛进程 ==="
+
+    # L1: 杀所有内层脚本 (setsid 会话)
     if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        echo "停止比赛进程 (PID: $PID)..."
-        kill $PID 2>/dev/null && echo "  已发送 SIGTERM"
-        sleep 3
-        kill -9 $PID 2>/dev/null && echo "  已发送 SIGKILL (强制)"
-        rm -f "$PIDFILE"
-        # 兜底清扫
-        pkill -9 -f 'roscore|rosmaster|rosout|roslaunch|rosrun|rplidarNode|move_base|amcl|mission_state_machine|safety_monitor' 2>/dev/null || true
-        pkill -9 -f 'doubao_tts|top_view_shot_node|usb_cam_node|start_lidar_motor|identify_node|llm_server' 2>/dev/null || true
-        echo "已停止"
-    else
-        echo "未找到运行中的比赛进程 (无 PID 文件: $PIDFILE)"
-        echo "尝试兜底清理..."
-        cleanup_all
+        PID=$(cat "$PIDFILE" 2>/dev/null)
+        [ -n "$PID" ] && kill $PID 2>/dev/null && echo "L1: SIGTERM → PID $PID"
     fi
+    pkill -9 -f 'abot_competition_inner\.sh' 2>/dev/null || true
+
+    # L2: 等 1s 让子进程退出
+    sleep 1
+
+    # L3: SIGKILL 全部已知 ROS 节点（按进程名/命令行特征）
+    pkill -9 -f 'roscore'                 2>/dev/null || true
+    pkill -9 -f 'rosmaster'               2>/dev/null || true
+    pkill -9 -f 'rosout'                  2>/dev/null || true
+    pkill -9 -f 'roslaunch'               2>/dev/null || true
+    pkill -9 -f 'rosrun'                  2>/dev/null || true
+    pkill -9 -f 'abot_driver'             2>/dev/null || true
+    pkill -9 -f 'abot_imu'                2>/dev/null || true
+    pkill -9 -f 'rplidarNode'             2>/dev/null || true
+    pkill -9 -f 'start_lidar_motor'       2>/dev/null || true
+    pkill -9 -f 'laser_filter'            2>/dev/null || true
+    pkill -9 -f 'scan_to_scan_filter_chain' 2>/dev/null || true
+    pkill -9 -f 'map_server'              2>/dev/null || true
+    pkill -9 -f 'amcl\b'                  2>/dev/null || true
+    pkill -9 -f 'amcl_tf_bridge'          2>/dev/null || true
+    pkill -9 -f 'move_base'               2>/dev/null || true
+    pkill -9 -f 'mission_state_machine'   2>/dev/null || true
+    pkill -9 -f 'safety_monitor'          2>/dev/null || true
+    pkill -9 -f 'doubao_asr'              2>/dev/null || true
+    pkill -9 -f 'doubao_tts'              2>/dev/null || true
+    pkill -9 -f 'top_view_shot_node'      2>/dev/null || true
+    pkill -9 -f 'usb_cam_node'            2>/dev/null || true
+    pkill -9 -f 'vlm_node'                2>/dev/null || true
+    pkill -9 -f 'identify_node'           2>/dev/null || true
+    pkill -9 -f 'llm_server'              2>/dev/null || true
+    pkill -9 -f 'robot_pose_ekf'          2>/dev/null || true
+    pkill -9 -f 'robot_state_publisher'   2>/dev/null || true
+    pkill -9 -f 'joint_state_publisher'   2>/dev/null || true
+    pkill -9 -f 'imu_filter_madgwick'     2>/dev/null || true
+    pkill -9 -f 'odom_ekf'                2>/dev/null || true
+    pkill -9 -f 'topic_tools/relay'       2>/dev/null || true
+    pkill -9 -f 'wheel_odom_relay'        2>/dev/null || true
+    pkill -9 -f 'cmd_vel_mux'             2>/dev/null || true
+    pkill -9 -f 'cmd_vel_smoother'        2>/dev/null || true
+    pkill -9 -f 'cmd_vel_safety_guard'    2>/dev/null || true
+    pkill -9 -f 'rviz'                    2>/dev/null || true
+    pkill -9 -f 'static_transform_publisher' 2>/dev/null || true
+    pkill -9 -f 'nav_monitor'             2>/dev/null || true
+    pkill -9 -f 'tf_echo\|tf2_echo'       2>/dev/null || true
+    pkill -9 -f 'rostopic'                2>/dev/null || true
+    pkill -9 -f 'rosnode'                 2>/dev/null || true
+    pkill -9 -f 'rosservice'              2>/dev/null || true
+    pkill -9 -f 'comp_startup\|comp_bringup\|comp_nav\|comp_mission\|comp_vlm\|comp_tts\|comp_wakeup\|comp_relay\|comp_tf_bridge\|comp_initpose\|comp_rviz\|comp_cleanup' 2>/dev/null || true
+
+    rm -f "$PIDFILE" "$INNER_SCRIPT"
+
+    # L4: 等端口释放
+    for i in $(seq 1 10); do
+        ss -tlnp 2>/dev/null | grep -q ':11311\b' || break
+        echo "  等待端口 11311 释放 ($i/10)..."
+        sleep 1
+    done
+
+    echo "=== 停止完成 ==="
     exit 0
 fi
 
@@ -350,11 +400,10 @@ roslaunch robot_slam navigation.launch map_name:=${MAP_NAME} > /tmp/comp_nav.log
 track $!
 sleep 15
 
-# [3.5] 里程计 relay: robot_pose_ekf 发布 /robot_pose_ekf/odom_combined 而非 /odom。
-# safety_monitor / mission_state_machine / move_base 均订阅 /odom，需要桥接。
-echo '[3.5] 里程计 relay: /wheel_odom -> /odom'
-rosrun topic_tools relay /wheel_odom /odom > /tmp/comp_relay.log 2>&1 &
-track $!
+# [3.5] 里程计: robot_with_imu.launch 中的 odom_ekf 已将
+# /robot_pose_ekf/odom_combined (EKF 融合 IMU+轮式) 转换成 /odom (Odometry)。
+# 不再 relay 裸轮式 /wheel_odom（麦克纳姆轮滑移导致累积漂移）。
+echo '[3.5] 里程计: odom_ekf 已发布 EKF 融合 /odom（跳过裸轮式 relay）'
 
 # [3.55] AMCL TF 桥接：用初始位姿引导 map->odom，后续订阅 /amcl_pose 动态更新
 echo '[3.55] AMCL TF 桥接 (map->odom)...'

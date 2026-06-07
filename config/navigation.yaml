@@ -57,15 +57,15 @@ DWAPlannerROS:
   min_vel_y: -0.20
   max_vel_trans: 0.55         # 实际平移限幅
   min_vel_trans: 0.02
-  max_vel_theta: 2.5          # 最大旋转速度 (rad/s), ≈143°/s
-  min_vel_theta: 0.5          # 最小旋转速度 (1.0太快过冲, 0.3太慢转不动, 0.5折中)
+  max_vel_theta: 3.5          # 最大旋转速度 (rad/s), ≈200°/s (提速减少死磕)
+  min_vel_theta: 0.5          # 最小旋转速度 (回退: 0.4转弯太犹豫, 振荡由yaw_tol解决)
   # -- 加速度 --
   acc_lim_x: 2.5              # 前向加速度 (m/s²)
   acc_lim_y: 2.5              # 横移加速度
-  acc_lim_theta: 4.0          # 旋转加速度 (rad/s²)
+  acc_lim_theta: 6.0          # 旋转加速度 (rad/s²), 配合提速更快到位
   # -- 到达判定 --
   xy_goal_tolerance: 0.03     # 位置容差 (m, 收紧确保终点完全入框)
-  yaw_goal_tolerance: 0.06    # 朝向容差 (rad), ≈3.4° 配合低 min_vel_theta 避免振荡
+  yaw_goal_tolerance: 0.20    # 朝向容差 (rad), ≈11.5° 配合 finish_yaw_tolerance=0.30 避免终点死磕
   latch_xy_goal_tolerance: false
   # -- 轨迹模拟 --
   sim_time: 1.7               # 前向模拟时长 (s), 越大轨迹越平滑, <1.5 会箭头闪

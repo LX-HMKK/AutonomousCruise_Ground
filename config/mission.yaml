@@ -24,7 +24,7 @@ timeouts:
 
 # ---- 等待时长 (全部可调) ----
 waits:
-  arrival_stabilize_s: 0.8         # 导航到达后位姿稳定等待（增加以消除运动模糊）
+  arrival_stabilize_s: 1.8         # 导航到达后位姿稳定等待（+1s 确保转向完全停稳再拍照）
   vision_trigger_delay_s: 0.5      # 到达视觉点后停车等稳再触发VLM
   nav_poll_interval_s: 0.5         # 导航轮询间隔
   speak_hold_s: 0.5                # 播报前停稳时间
@@ -34,8 +34,8 @@ navigation:
   task_center_tolerance_m: 0.04    # 任务点中心容差；仿真中不为 yaw=0 末端旋转拖满超时
   vision_xy_tolerance_m: 0.04      # 视觉点位置容差，避免 move_base 末端旋转恢复拖满超时
   vision_yaw_tolerance_rad: 0.12   # 视觉点车头朝向容差，约 6.9°
-  finish_xy_tolerance_m: 0.03      # 终点位置容差（收紧以确保完全入框）
-  finish_yaw_tolerance_rad: 0.06   # 终点朝向容差（车头指向场地中心，约 3.4°）
+  finish_xy_tolerance_m: 0.12      # 终点位置容差（LiDAR 在车体前方6cm，留余量容忍配准偏差）
+  finish_yaw_tolerance_rad: 0.30   # 终点朝向容差（≈17°，终点不强制精确朝向）
 
 # ---- 任务点验证 ----
 target_cells:
