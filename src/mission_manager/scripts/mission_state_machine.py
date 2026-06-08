@@ -715,8 +715,12 @@ class MissionStateMachine(object):
                         self._send_nav_goal(cx, cy, target_yaw)
                         return
                     else:
-                        rospy.logwarn('[Mission] Phase %d: Footprint retry limit reached (%d), accepting position',
+                        cx, cy = detail['task_center']
+                        rospy.logwarn('[Mission] Phase %d: Footprint retry limit reached (%d), trying open-loop',
                                       phase, max_footprint_retries)
+                        self._openloop_approach(cx, cy)
+                        rospy.sleep(0.3)
+                        rospy.logwarn('[Mission] Phase %d: Accepting position after open-loop attempt', phase)
             else:
                 rospy.loginfo('[Mission] Phase %d: Footprint verified inside task region', phase)
 
@@ -832,8 +836,11 @@ class MissionStateMachine(object):
                 self.transition(MissionState.NAVIGATE_TO_FINISH)
                 return
             else:
-                rospy.logwarn('[Mission] Max finish nav retries exceeded, proceeding anyway')
+                rospy.logwarn('[Mission] Max finish nav retries exceeded, trying open-loop fallback')
                 self.move_base_client.cancel_goal()
+                rospy.sleep(0.5)
+                if self.last_nav_goal:
+                    self._openloop_approach(self.last_nav_goal[0], self.last_nav_goal[1])
         else:
             self.finish_nav_retry_count = 0
 
@@ -872,6 +879,66 @@ class MissionStateMachine(object):
         # 在 abort handler 中不需要再检查 abort（已经处于 abort 状态）
 
     # ========== Helpers ==========
+
+    def _openloop_approach(self, target_x, target_y):
+        """开环逼近：转正车头→直行，仅用于 <0.3m 的末端微调。
+
+        当 move_base 因 AMCL 定位漂移无法完成最后一步时，用定时速度指令做
+        开环逼近。仅使用 x 轴直行（Mecanum 最可靠方向：四轮同向驱动）。
+
+        Returns:
+            bool: True 如果执行了开环运动，False 如果跳过（距离太远/无位姿）
+        """
+        rx, ry, ryaw = self._get_current_pose()
+        if rx is None:
+            rospy.logwarn('[Mission] Open-loop: no current pose, skipping')
+            return False
+
+        dx = target_x - rx
+        dy = target_y - ry
+        dist = math.sqrt(dx*dx + dy*dy)
+
+        if dist > 0.30:
+            rospy.logwarn('[Mission] Open-loop: distance %.3f > 0.30m, skipping', dist)
+            return False
+        if dist < 0.015:
+            rospy.loginfo('[Mission] Open-loop: already at target (%.3fm)', dist)
+            return True
+
+        rospy.loginfo('[Mission] Open-loop: approaching (%.3fm, %.3f deg)',
+                      dist, math.degrees(math.atan2(dy, dx)))
+
+        # 1) 转正车头对准目标方向
+        target_heading = math.atan2(dy, dx)
+        yaw_err = self._angle_diff(ryaw, target_heading)
+        if yaw_err > 0.15:
+            twist = Twist()
+            twist.angular.z = 1.0 if math.sin(target_heading - ryaw) > 0 else -1.0
+            rotate_duration = min(yaw_err / 1.0, 2.0)
+            t0 = time.time()
+            while time.time() - t0 < rotate_duration:
+                self.cmd_vel_pub.publish(twist)
+                rospy.sleep(0.05)
+            self._stop_robot()
+            rospy.sleep(0.3)
+
+        # 2) 直行
+        twist = Twist()
+        twist.linear.x = 0.10  # 0.10 m/s, 极慢速度最小化打滑
+        drive_duration = max(0.5, min(dist / 0.10, 3.0))
+        t0 = time.time()
+        while time.time() - t0 < drive_duration:
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.05)
+        self._stop_robot()
+
+        # 验证
+        rx2, ry2, _ = self._get_current_pose()
+        if rx2 is not None:
+            final_dist = math.sqrt((target_x - rx2)**2 + (target_y - ry2)**2)
+            rospy.loginfo('[Mission] Open-loop done: final distance %.3fm', final_dist)
+
+        return True
 
     def _speak(self, text):
         """发送 TTS 播报（非阻塞）。播报发布即返回，不等待 /tts_done。"""

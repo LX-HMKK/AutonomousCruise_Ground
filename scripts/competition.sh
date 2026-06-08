@@ -76,6 +76,7 @@ cleanup_all() {
     pkill -9 -f 'start_lidar_motor'      2>/dev/null || true
     pkill -9 -f 'lidar_loc'              2>/dev/null || true
     pkill -9 -f 'robot_pose_ekf'         2>/dev/null || true
+    pkill -9 -f 'cov_inflate'            2>/dev/null || true
     pkill -9 -f 'cmd_vel_smoother'       2>/dev/null || true
     pkill -9 -f 'cmd_vel_mux'            2>/dev/null || true
     pkill -9 -f 'cmd_vel_safety_guard'   2>/dev/null || true
@@ -130,6 +131,7 @@ if [ "${1:-}" = "--stop" ]; then
     pkill -9 -f 'identify_node'           2>/dev/null || true
     pkill -9 -f 'llm_server'              2>/dev/null || true
     pkill -9 -f 'robot_pose_ekf'          2>/dev/null || true
+    pkill -9 -f 'cov_inflate'            2>/dev/null || true
     pkill -9 -f 'robot_state_publisher'   2>/dev/null || true
     pkill -9 -f 'joint_state_publisher'   2>/dev/null || true
     pkill -9 -f 'imu_filter_madgwick'     2>/dev/null || true
@@ -360,6 +362,7 @@ inner_cleanup() {
     pkill -9 -f 'identify_node'          2>/dev/null || true
     pkill -9 -f 'llm_server'             2>/dev/null || true
     pkill -9 -f 'robot_pose_ekf'         2>/dev/null || true
+    pkill -9 -f 'cov_inflate'            2>/dev/null || true
     pkill -9 -f 'cmd_vel_smoother'       2>/dev/null || true
     pkill -9 -f 'cmd_vel_mux'            2>/dev/null || true
     pkill -9 -f 'cmd_vel_safety_guard'   2>/dev/null || true

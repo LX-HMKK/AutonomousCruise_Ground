@@ -22,16 +22,21 @@
         <param name="publish_tf" value="false" />
     </node>
 
+    <!-- 协方差放大: 轮式里程计打滑 → 降权, 让 EKF 更依赖 IMU -->
+    <node pkg="abot_bringup" type="cov_inflate.py" name="cov_inflate" output="screen">
+        <param name="factor" value="5.0" />
+    </node>
+
    <node pkg="robot_pose_ekf" type="robot_pose_ekf" name="robot_pose_ekf" output="screen">
         <param name="output_frame" value="odom" />
         <param name="base_footprint_frame" value="base_footprint"/>
         <param name="freq" value="200.0"/>
-        <param name="sensor_timeout" value="1.0"/>  
+        <param name="sensor_timeout" value="1.0"/>
         <param name="odom_used" value="true"/>
         <param name="imu_used" value="true"/>
         <param name="vo_used" value="false"/>
         <param name="debug" value="false"/>
-        <remap from="odom" to="wheel_odom" />
+        <remap from="odom" to="wheel_odom_inflated" />
         <remap from="imu_data" to="imu/data" />
     </node> 
 
