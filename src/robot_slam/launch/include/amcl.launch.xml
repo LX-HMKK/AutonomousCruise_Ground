@@ -14,8 +14,8 @@
     <param name="odom_model_type" value="omni"/>
     <param name="odom_alpha5" value="0.1"/>
     <param name="gui_publish_rate" value="10.0"/>
-    <!-- 激光: 5m 范围, 120 束均匀采样 (1/3 密度; 平衡配准与更新频率) -->
-    <param name="laser_max_beams" value="120"/>
+    <!-- 激光: 5m 范围, 180 束均匀采样 (更精细配准) -->
+    <param name="laser_max_beams" value="180"/>
     <param name="laser_max_range" value="5.0"/>
     <!-- 粒子: 300/1500 粒 (保守策略, 容忍轮式打滑; 1500×120=180k 评估/更新) -->
     <param name="min_particles" value="300"/>
@@ -27,24 +27,24 @@
     <param name="odom_alpha2" value="0.2"/>
     <param name="odom_alpha3" value="0.2"/>
     <param name="odom_alpha4" value="0.2"/>
-    <!-- 观测模型: 权重和=1.0, 保持高匹配置信度防止旋转丢配准 -->
-    <param name="laser_z_hit" value="0.85"/>
+    <!-- 观测模型: 激光配准高权重, 粒子更聚拢 -->
+    <param name="laser_z_hit" value="0.90"/>
     <param name="laser_z_short" value="0.05"/>
     <param name="laser_z_max" value="0.05"/>
-    <param name="laser_z_rand" value="0.10"/>
+    <param name="laser_z_rand" value="0.05"/>
     <param name="laser_sigma_hit" value="0.15"/>
     <param name="laser_lambda_short" value="0.1"/>
     <param name="laser_model_type" value="likelihood_field"/>
     <param name="laser_likelihood_max_dist" value="2.0"/>
-    <!-- 更新阈值: 移动 12cm 或 转动 6.9° 触发 (减少错误里程计注入 AMCL) -->
-    <param name="update_min_d" value="0.12"/>
-    <param name="update_min_a" value="0.12"/>
+    <!-- 更新阈值: 移动 8cm 或 转动 5.7° 触发 (odom 更准后更频繁更新安全) -->
+    <param name="update_min_d" value="0.08"/>
+    <param name="update_min_a" value="0.10"/>
     <param name="odom_frame_id" value="odom"/>
     <param name="resample_interval" value="1"/>
     <param name="transform_tolerance" value="0.3"/>
-    <!-- 恢复随机注入: 启用, alpha_fast=0.05 平衡恢复速度 (ROS默认0.1) -->
+    <!-- 恢复随机注入: alpha_fast=0.03 降低随机粒子注入速率 (定位更稳定) -->
     <param name="recovery_alpha_slow" value="0.001"/>
-    <param name="recovery_alpha_fast" value="0.05"/>
+    <param name="recovery_alpha_fast" value="0.03"/>
     <remap from="scan" to="$(arg scan_topic)"/>
   </node>
 </launch>
