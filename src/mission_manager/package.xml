@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>mission_manager</name>
-  <version>0.1.0</version>
+  <version>1.0.0</version>
   <description>Ground cruise mission state machine and safety monitor</description>
   <maintainer email="lx_hm@example.com">lx_hm</maintainer>
   <license>MIT</license>

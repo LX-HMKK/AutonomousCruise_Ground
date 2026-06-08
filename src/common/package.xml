@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>common</name>
-  <version>0.1.0</version>
+  <version>1.0.0</version>
   <description>Common utilities: config loading, logging, data types</description>
   <maintainer email="lx_hm@example.com">lx_hm</maintainer>
   <license>MIT</license>
