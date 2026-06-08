@@ -3,7 +3,7 @@
 
 mission:
   map_name: competition_field      # 地图名 (competition_field / game / my_lab)
-  max_time_s: 200                  # 比赛总时长上限 (仿真围墙增加绕行, 需 200s)
+  max_time_s: 240                  # 比赛总时长上限 (4分钟)
   required_task_image_count: 4     # 需要完成的任务图像数量
   require_start_voice: true        # 是否需要开始语音
   require_finish_voice: true       # 是否需要结束语音
@@ -18,8 +18,9 @@ timeouts:
   no_state_change_s: 60            # 单状态最长停留时间 (导航+识别可能较长)
   perception_retry_limit: 1        # 识别失败最大重试次数 (省token，仅重试1次)
   navigation_retry_limit: 2        # 导航失败最大重试次数
+  max_task_skips: 1               # 最多跳过几个不可达任务点，超限后 ABORT
   footprint_retry_limit: 2         # 到达后 footprint 修正次数，避免厘米级误差反复等待
-  navigation_goal_timeout_s: 45    # 单次导航超时（横穿全场需考虑 DWA 振荡恢复）
+  navigation_goal_timeout_s: 90    # 单次导航超时（放宽到90s，容忍膨胀层绕行）
   nav_stuck_timeout_s: 10.0        # 导航卡死检测 (位移<2cm且yaw变化<0.05rad)
 
 # ---- 等待时长 (全部可调) ----

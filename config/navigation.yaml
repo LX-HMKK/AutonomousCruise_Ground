@@ -26,7 +26,7 @@ global_costmap:
   resolution: 0.02           # 5cm/pixel，精度足够
   obstacle_range: 1.5        # 障碍物检测距离 (m)
   raytrace_range: 2.5        # 射线清除距离 (m)，大于 obstacle_range
-  inflation_radius: 0.22     # 障碍物膨胀半径 (m)，留足安全距离
+  inflation_radius: 0.05     # 障碍物膨胀半径 (m)，极限收紧
   cost_scaling_factor: 10.0  # 代价衰减 (1~20)，越大障碍物影响范围越小
   map_type: costmap
 
@@ -44,7 +44,7 @@ local_costmap:
   resolution: 0.02
   obstacle_range: 1.5
   raytrace_range: 2.0
-  inflation_radius: 0.1      # 局部膨胀半径，比全局小（更精细避障）
+  inflation_radius: 0.02      # 局部膨胀半径，极限收紧
   cost_scaling_factor: 3.0   # 局部代价衰减，比全局小（更灵敏）
   map_type: costmap
 
@@ -57,32 +57,32 @@ DWAPlannerROS:
   min_vel_y: -0.20
   max_vel_trans: 0.55         # 实际平移限幅
   min_vel_trans: 0.02
-  max_vel_theta: 3.5          # 最大旋转速度 (rad/s), ≈200°/s (提速减少死磕)
-  min_vel_theta: 0.05         # 最小旋转速度: 近零速精调, 避免末端抽搐 (Mecanum 无慢转档)
+  max_vel_theta: 4.0          # 最大旋转速度 (rad/s), ≈229°/s 窄空间快速调整
+  min_vel_theta: 0.05         # 最小旋转速度: 近零速精调, 保证旋转精度
   # -- 加速度 --
   acc_lim_x: 2.5              # 前向加速度 (m/s²)
   acc_lim_y: 2.5              # 横移加速度
   acc_lim_theta: 6.0          # 旋转加速度 (rad/s²), 配合提速更快到位
   # -- 到达判定 --
-  xy_goal_tolerance: 0.06     # 位置容差 (m, Mecanum 打滑达不到 3cm, 翻倍止损)
-  yaw_goal_tolerance: 0.20    # 朝向容差 (rad), ≈11.5° 配合 finish_yaw_tolerance=0.30 避免终点死磕
+  xy_goal_tolerance: 0.12     # 位置容差 (m)，放宽减少末端犹豫
+  yaw_goal_tolerance: 0.20    # 朝向容差 (rad), ≈11.5°
   latch_xy_goal_tolerance: false
   # -- 轨迹模拟 --
-  sim_time: 1.2               # 前向模拟时长 (s), 缩短避免曲线绕路反转
+  sim_time: 1.5               # 前向模拟时长 (s), 延长提前规划绕行
   vx_samples: 10              # x 速度采样数
   vy_samples: 7               # y 速度采样数 (全向轮建议 5~10)
   vth_samples: 20             # 角速度采样数
   controller_frequency: 10.0
   # -- 代价权重 --
-  path_distance_bias: 20.0    # 跟全局路径权重, 降低允许更自由原地旋转
-  goal_distance_bias: 32.0    # 朝目标前进权重, 加大直奔终点避免弧线绕路
-  occdist_scale: 0.05         # 避障权重 (0.01~0.10), 越大离障碍越远
+  path_distance_bias: 12.0    # 跟全局路径权重, 弱化允许偏离绕障
+  goal_distance_bias: 45.0    # 朝目标前进权重, 强化目标引力减少绕圈
+  occdist_scale: 0.02         # 避障权重 (0.01~0.10), 降低允许贴边绕障
   # -- 其他 --
   forward_point_distance: 0.325
   stop_time_buffer: 0.2       # 碰撞前停车缓冲 (s)
   scaling_speed: 0.25
   max_scaling_factor: 0.2
-  oscillation_reset_dist: 0.10  # 移动超过此距离重置震荡检测 (增大避免误判)
+  oscillation_reset_dist: 0.15  # 移动超过此距离重置震荡检测 (进一步避免误判)
   publish_traj_pc: true         # 发布轨迹点云 (RViz 可视化)
   publish_cost_grid_pc: true    # 发布代价网格 (RViz 可视化)
   holonomic_robot: true         # 全向底盘 (麦克纳姆轮)
@@ -94,7 +94,7 @@ GlobalPlanner:
   use_dijkstra: true           # Dijkstra 算法 (true=最短路径, false=A*)
   use_grid_path: false
   allow_unknown: true          # 允许穿过未知区域规划
-  default_tolerance: 0.1       # 目标点被障碍物占据时，在此半径内找最近可行点 (m)
+  default_tolerance: 0.20       # 目标点被障碍物占据时，在此半径内找最近可行点 (m)
   publish_scale: 100
   lethal_cost: 253
   neutral_cost: 50

@@ -17,4 +17,5 @@ voice_text:
   abort_localization_lost: "定位丢失"
   abort_perception_failed: "识别失败"
   abort_navigation_failed: "导航失败"
+  task_skip: "跳过"
   abort_manual_stop: "手动停止"

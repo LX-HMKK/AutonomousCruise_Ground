@@ -40,7 +40,7 @@ python tools/test_doubao_asr_flash.py
 ## 环境
 
 - **本机**: Windows WSL Ubuntu 18.04 + ROS Melodic，工作空间 `~/abot_ws/`
-- **远端**: ABOT `172.16.25.154`（赛场公用，临时使用）。开发工作空间 `~/abot_dev_ws/`
+- **远端**: ABOT `172.16.25.45`（赛场公用，临时使用）。开发工作空间 `~/abot_dev_ws/`
 - **远端当前 IP** 以用户告知为准。连接方式为 SSH `abot@<IP>`
 
 ### 解释器隔离

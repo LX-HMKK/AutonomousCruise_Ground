@@ -86,33 +86,46 @@ class AmclTfBridge(object):
         self.timer = rospy.Timer(rospy.Duration(0.1), self._publish_tf)
 
     def _on_amcl_pose(self, msg):
-        """收到 AMCL 位姿时，在回调中同步计算 map→odom（保证时间对齐）"""
+        """收到 AMCL 位姿时，在回调中同步计算 map→odom（保证时间对齐）
+
+        启动阶段 AMCL 首条 pose 时间戳可能早于 odom→base_link TF 缓存，
+        此时回退到 rospy.Time(0) 取最新 TF，打破 "无定位→不动→无更新" 死锁。
+        """
         try:
-            # 用 AMCL 消息时间戳查里程计
+            # 用 AMCL 消息时间戳查里程计（精确时间对齐）
             odom_to_base = self.tf_buffer.lookup_transform(
                 'odom', 'base_link', msg.header.stamp, rospy.Duration(0.3))
-
-            map_t, map_q = _pose_to_tq(msg.pose.pose)
-            odom_t = [odom_to_base.transform.translation.x,
-                      odom_to_base.transform.translation.y,
-                      odom_to_base.transform.translation.z]
-            odom_q = [odom_to_base.transform.rotation.x,
-                      odom_to_base.transform.rotation.y,
-                      odom_to_base.transform.rotation.z,
-                      odom_to_base.transform.rotation.w]
-
-            inv_t, inv_q = _invert_transform(odom_t, odom_q)
-            result_t, result_q = _compose_transforms(map_t, map_q, inv_t, inv_q)
-
-            self.current_tf = _tq_to_transform(result_t, result_q, rospy.Time.now())
-            if not self.has_amcl:
-                self.has_amcl = True
-                rospy.loginfo('[AmclTfBridge] First AMCL update: map->odom = (%.3f, %.3f, %.3f)',
-                              result_t[0], result_t[1], result_t[2])
-
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
-                tf2_ros.ExtrapolationException) as e:
+        except tf2_ros.ExtrapolationException:
+            # 启动阶段时间戳回溯失败 → 回退到最新可用 TF
+            try:
+                odom_to_base = self.tf_buffer.lookup_transform(
+                    'odom', 'base_link', rospy.Time(0), rospy.Duration(0.3))
+            except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                    tf2_ros.ExtrapolationException) as e:
+                rospy.logwarn_throttle(5,
+                    '[AmclTfBridge] TF lookup failed (fallback): %s', e)
+                return
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException) as e:
             rospy.logwarn_throttle(5, '[AmclTfBridge] TF lookup failed: %s', e)
+            return
+
+        map_t, map_q = _pose_to_tq(msg.pose.pose)
+        odom_t = [odom_to_base.transform.translation.x,
+                  odom_to_base.transform.translation.y,
+                  odom_to_base.transform.translation.z]
+        odom_q = [odom_to_base.transform.rotation.x,
+                  odom_to_base.transform.rotation.y,
+                  odom_to_base.transform.rotation.z,
+                  odom_to_base.transform.rotation.w]
+
+        inv_t, inv_q = _invert_transform(odom_t, odom_q)
+        result_t, result_q = _compose_transforms(map_t, map_q, inv_t, inv_q)
+
+        self.current_tf = _tq_to_transform(result_t, result_q, rospy.Time.now())
+        if not self.has_amcl:
+            self.has_amcl = True
+            rospy.loginfo('[AmclTfBridge] First AMCL update: map->odom = (%.3f, %.3f, %.3f)',
+                          result_t[0], result_t[1], result_t[2])
 
     def _publish_tf(self, event):
         """仅发布当前缓存的 map→odom，不做计算"""
