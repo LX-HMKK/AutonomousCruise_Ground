@@ -4,6 +4,59 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-08
+
+### Added
+- 轮式里程计协方差放大节点 `cov_inflate`，将 `/wheel_odom` 协方差×5 降权后发布到 `/wheel_odom_inflated`，robot_pose_ekf 更信任 IMU
+- 开环逼近回退方法 `_openloop_approach`，move_base 重试耗尽后定时直行微调（仅用于 <0.3m 末端）
+
+### Changed
+- DWA 末端防抽搐：`min_vel_theta` 0.5→0.05，`xy_goal_tolerance` 0.03→0.06，`sim_time` 1.7→1.2
+- DWA 旋转不绕路：`path_distance_bias` 32→20，`goal_distance_bias` 24→32
+- AMCL 参数回归保守：`odom_alpha` 0.1→0.2，粒子 100/600→300/1500，`update_min_d` 0.06→0.12，`laser_z_rand` 0.05→0.10
+- 版号更新：5 个 package 升至 1.0.0
+
+### Fixed
+- 终点定位丢失：测试终点 10s 直达，全程零重试零抽搐
+
+## [1.0.0] - 2026-06-08
+
+### Added
+- 豆包 ASR 极速版语音唤醒（"开始比赛"语音触发，火山引擎 `volc.bigasr.auc_turbo`）
+- 豆包 TTS V1 语音播报（任务点、到达、终点等场景，强制 HDMI 扬声器输出）
+- 三种实车运行模式（Snowboy 唤醒 / SSH 后台 setsid / 模式3 自动开始）
+- 比赛场地 8 点位视觉+任务导航流程（先拍照识别后导航执行）
+- 远端导航实时监控脚本 `nav_monitor.py`
+- 地图标点 GUI 工具 `mark_map_gui.py`（零依赖 tkinter，滚轮缩放+中键平移）
+- `amcl_tf_bridge.py` 动态 `map→odom` TF 桥接，修复 AMCL 1.16.7 不发布 TF 的 bug
+- `start_lidar_motor.py` LiDAR 电机防御启动节点
+- 仿真系统：全向底盘模拟、动态障碍物、视觉点车头朝向、围墙点云
+- 导航卡死检测（位移+yaw 变化监控，超时自动取消 goal）
+
+### Changed
+- 任务顺序重构为先拍照后导航执行（vision phase → task phase）
+- 视觉点 `offset_m` 统一调整（0.20→0.35m，靠后防撞墙）
+- 识别重试次数降低：`perception_retry_limit` 3→1
+- 定位丢失监控阈值放宽：`max_pos_std_m` 0.8m，防站立起步误判
+- 全局超时 180→200s（仿真围墙绕行）
+- 下机流程新增远端源码清理（保留 build/devel）
+- `rplidar.launch` 串口改为 `/dev/rplidar`，去掉 `respawn`
+
+### Fixed
+- LiDAR 电机不自动启动、节点同名冲突（去掉 respawn + udev 规则修复）
+- 轮式里程计裸桥接 `/wheel_odom_relay` 与 `odom_ekf` 双源竞争（已移除 relay）
+- AMCL 定位漂移 → 动态 TF 桥接 + 保守参数 + 协方差降权
+- 终点定位丢失 → 开环回退兜底
+- DWA 末端抽搐 → `min_vel_theta` 降至 0.05
+- TTS 音频被蓝牙耳机劫持（强制 `alsa_output.pci-...hdmi-stereo-extra1` sink）
+- VLM Py2/Py3 冲突（拆分为 Python 2 bridge + Python 3.9 worker 跨进程通信）
+- 四脚本僵尸进程（trap cleanup EXIT INT TERM + 四层清理）
+- SSH 多会话 ROS_MASTER_URI 不可达
+- 相机 `/dev/video0→video1` 漂移（udev 规则固定 `/dev/usb_cam`）
+- 实车 4 条链路 P0 崩溃（相机/位姿源/定位监控/VLM/启动时序）
+- 仿真 `odom` 位姿冻结、heartbeat 刷屏、footprint 死循环
+- 状态机 `<=2` 重试多跑一次导致开环触发不及时
+
 ### M7+ — 远端 LiDAR 启动问题治理 (2026-06-05)
 
 #### Fixed

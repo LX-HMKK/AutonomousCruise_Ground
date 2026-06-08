@@ -1,5 +1,9 @@
 # 自主巡航 — 地面巡航场景
 
+[![Release](https://img.shields.io/badge/release-v1.1.0-blue)](https://github.com/LX-HMKK/AutonomousCruise_Ground/releases/tag/v1.1.0)
+[![ROS](https://img.shields.io/badge/ROS-Melodic-green)](https://www.ros.org/)
+[![Python](https://img.shields.io/badge/Python-2.7%20%7C%203.9-yellow)](https://www.python.org/)
+
 第二十八届中国机器人及人工智能大赛 · 机器人任务挑战赛：自主巡航（场景一：地面巡航场景）。
 
 ## 项目目标
@@ -34,7 +38,7 @@
 | ROS | Melodic (Python 2.7) |
 | 工作空间 | `~/abot_ws/` (catkin) |
 | 仿真 | 先验地图 + mock 数据 |
-| 远端设备 | ABOT 机器人 `172.16.24.173` (赛场公用) |
+| 远端设备 | ABOT 机器人 `172.16.25.45` (赛场公用) |
 
 ## 目录结构
 
@@ -51,7 +55,7 @@
 │   ├── mission_manager/                 # 【核心】任务状态机 + 安全监控 + 仿真 mock
 │   ├── common/                          # 配置加载、日志、网格坐标转换
 │   ├── robot_slam/                      # 导航定位/建图/ASR/唤醒词
-│   ├── abot_base/                       # ABOT 底盘驱动/IMU/URDF 模型/激光滤波
+│   ├── abot_base/                       # ABOT 底盘驱动/IMU/URDF 模型/激光滤波/协方差降权
 │   └── abot_vlm/                        # 豆包大模型视觉识别（任务图像）
 ├── tools/                               # Windows 端工具
 │   ├── generate_map.py                  # YAML → PGM 地图生成（围栏+网格线）
@@ -91,10 +95,11 @@ RViz 中默认显示全局地图、全局代价地图、local plan、cost cloud 
 
 | 模块 | 关键文件 | 职责 |
 |---|---|---|
-| 定位 | Cartographer (`zoo_2Dlidar_localication.launch`) AMCL (`include/amcl.launch.xml`) | 2D 激光雷达实时定位 |
+| 定位 | AMCL (`include/amcl.launch.xml`) + `amcl_tf_bridge.py` | 2D 激光雷达实时定位，保守参数抗轮式打滑 |
 | 导航 | `include/move_base.launch.xml` + `params/carto/*.yaml` | move_base + DWA 局部规划 + GlobalPlanner 全局规划，已调优适配 3.6m 场地 |
-| 唤醒词 | `scripts/start.py` + `resources/models/startGame.pmdl` | Snowboy 热词检测，触发后发布 `/start` |
-| 语音识别 | `scripts/demo.py` + `scripts/paraformer-zh/` | FunASR Paraformer 中文识别（10s 录音），发布 `/chinese_topic` |
+| 唤醒词 | `scripts/start.py` + `resources/models/startGame.pmdl` | Snowboy 热词检测，触发后发布 `/start`（当前使用豆包 ASR 替代） |
+| 语音识别 | `scripts/doubao_asr.py` | 火山引擎豆包 ASR 极速版中文识别，发布 `/start` |
+| TF 桥接 | `scripts/amcl_tf_bridge.py` | 动态计算 `map→odom` TF，修复 AMCL 1.16.7 不发布 TF 的 bug |
 | 建图 | `launch/gmapping.launch` `launch/hector_mapping.launch` | Gmapping / Hector SLAM 建图 |
 | 地图 | `maps/competition_field.yaml, game.yaml, my_lab.yaml` | 先验地图（仿真用 competition_field 3.6m 场地, game 实赛场） |
 
@@ -184,6 +189,7 @@ obstacles:
 | M5 | 完整任务链路联调（game 地图接入、坐标系验证） | ✅ 完成 |
 | M6 | 鲁棒性增强（导航卡死检测、footprint 重试降级） | ✅ 完成 |
 | M7 | 参赛文档与答辩准备 | ✅ 完成 |
+| M8 | EKF 里程计降权 + DWA 防抽搐修复（v1.1.0 发布） | ✅ 完成 |
 
 ## 提交规范
 
