@@ -556,7 +556,7 @@ class MissionStateMachine(object):
         rospy.loginfo('[Mission] Phase %d: Target cell=%d', phase, self.target_cell)
         text = self.voice_cfg['voice_text']['task_image_recognized'].format(
             index=phase, target_cell=self.target_cell)
-        self._speak(text)
+        self._speak(text, wait=True)
         if self._check_aborted():
             return
 
@@ -772,7 +772,7 @@ class MissionStateMachine(object):
 
     def _handle_announce_task(self, phase):
         text = self.voice_cfg['voice_text']['task_arrived'].format(target_cell=self.target_cell)
-        self._speak(text)
+        self._speak(text, wait=True)
         if self._check_aborted():
             return
         self.logger.log_voice(text, 'task_arrived')
@@ -794,7 +794,7 @@ class MissionStateMachine(object):
         self._stop_robot()
 
         text = self.voice_cfg['voice_text'].get('task_skip', u'跳过').format(target_cell=self.target_cell)
-        self._speak(text)
+        self._speak(text, wait=True)
         rospy.loginfo('[Mission] Phase %d: Task cell %d skipped (%d/%d skips used)',
                       phase, self.target_cell, self.task_skip_count,
                       self.mission_cfg['timeouts'].get('max_task_skips', 1))
@@ -916,7 +916,7 @@ class MissionStateMachine(object):
 
         self._stop_robot()
         text = self.voice_cfg['voice_text']['finish_arrived']
-        self._speak(text)
+        self._speak(text, wait=True)
         if self._check_aborted():
             return
         self.transition(MissionState.FINISH_ANNOUNCE)
@@ -1010,16 +1010,28 @@ class MissionStateMachine(object):
 
         return True
 
-    def _speak(self, text):
-        """发送 TTS 播报（非阻塞）。播报发布即返回，不等待 /tts_done。"""
+    def _speak(self, text, wait=False):
+        """发送 TTS 播报。
+
+        wait=False: 发布即返回（fire-and-forget，用于过渡语音）。
+        wait=True:  等待 /tts_done 回执，超时 8s 不卡死（用于关键节点语音）。
+        """
         try:
             msg = String()
             msg.data = text
             self.voice_pub.publish(msg)
         except Exception as e:
             rospy.logerr('[Mission] TTS publish failed: %s', str(e))
+            return
 
         rospy.loginfo('[Mission] TTS: %s', text)
+
+        if wait:
+            self._tts_pending = text
+            self.tts_done_event.clear()
+            if not self.tts_done_event.wait(timeout=8.0):
+                rospy.logwarn('[Mission] TTS wait timeout: %s', text[:30])
+            self._tts_pending = None
 
     def _stop_robot(self):
         """确保机器人完全停止。"""
