@@ -407,6 +407,11 @@ class MissionStateMachine(object):
         if self._check_aborted():
             return
         self.logger.log_voice(text, 'start')
+        # AMCL 冷启动收敛旋转: 原地旋转产生多方向激光配准，加速粒子群收敛 (~5s)
+        if not self.sim_mode:
+            self._convergence_rotate()
+        if self._check_aborted():
+            return  # 旋转期间收到安全 ESTOP，保留 abort 状态
         self.task_index = 0
         self.perception_retry_count = 0
         self.vision_phase = True
@@ -644,41 +649,42 @@ class MissionStateMachine(object):
                          GoalStatus.RECALLED, GoalStatus.PREEMPTED, GoalStatus.LOST):
                 break
 
-            # 检查运动进度（卡死检测：平移 + 旋转）
+            # 检查运动进度（卡死检测 + 振荡检测）
             rx, ry, ryaw = self._get_current_pose()
+
+            # 振荡检测: 靠近目标时持续计时, 不因旋转重置（独立于历史数据）
+            if rx is not None:
+                center_dist = None
+                if self.target_cell is not None:
+                    cx, cy = get_cell_center_xy(self.target_cell, self.field_cfg)
+                    center_dist = ((rx - cx)**2 + (ry - cy)**2) ** 0.5
+
+                if center_dist is not None and center_dist <= 0.20:
+                    if nearby_stall_since is None:
+                        nearby_stall_since = time.time()
+                    elif time.time() - nearby_stall_since > 20.0:
+                        rospy.loginfo('[Mission] Phase %d: Nearby stall accepted (dist=%.3f, %.1fs)',
+                                      phase, center_dist, time.time() - nearby_stall_since)
+                        arrived_by_nearby = True
+                        self.move_base_client.cancel_goal()
+                        break
+                elif center_dist is not None and center_dist > 0.30:
+                    nearby_stall_since = None  # 滞后: 离开 0.30m 才重置, 防边界振荡
+
+            # 传统卡死检测（需要历史数据，仅远距时生效）
             if rx is not None and last_x is not None:
                 dist = ((rx - last_x)**2 + (ry - last_y)**2) ** 0.5
                 yaw_diff = abs(ryaw - last_yaw) if (ryaw is not None and last_yaw is not None) else 0.0
-                is_moving = (dist >= 0.02 or yaw_diff >= 0.05)
-                if not is_moving:
-                    # 近距停滞接受: 距离目标<0.15m且停滞>15s → 直接接受,不重试
-                    # 注意: 近距模式与常规卡死检测互斥,避免 10s stuck_timeout 抢先触发
-                    center_dist = None
-                    if self.target_cell is not None:
-                        cx, cy = get_cell_center_xy(self.target_cell, self.field_cfg)
-                        center_dist = ((rx - cx)**2 + (ry - cy)**2) ** 0.5
-                    if center_dist is not None and center_dist <= 0.15:
-                        if nearby_stall_since is None:
-                            nearby_stall_since = time.time()
-                        elif time.time() - nearby_stall_since > 15.0:
-                            rospy.loginfo('[Mission] Phase %d: Nearby stall accepted (dist=%.3f < 0.15, stalled %.1fs)',
-                                          phase, center_dist, time.time() - nearby_stall_since)
-                            arrived_by_nearby = True
-                            self.move_base_client.cancel_goal()
-                            break
-                    else:
-                        nearby_stall_since = None
-                        # 远距卡死检测: 仅在未靠近目标时活跃
-                        if stuck_since is None:
-                            stuck_since = time.time()
-                        elif time.time() - stuck_since > stuck_timeout:
-                            rospy.logwarn('[Mission] Phase %d: Robot stuck (no progress for %.1fs, dist=%.3f, yaw_diff=%.3f)',
-                                          phase, stuck_timeout, dist, yaw_diff)
-                            self.move_base_client.cancel_goal()
-                            break
+                if dist >= 0.02 or yaw_diff >= 0.05:
+                    stuck_since = None
                 else:
-                    stuck_since = None  # 机器人仍在移动
-                    nearby_stall_since = None
+                    if stuck_since is None:
+                        stuck_since = time.time()
+                    elif time.time() - stuck_since > stuck_timeout:
+                        rospy.logwarn('[Mission] Phase %d: Robot stuck (no progress for %.1fs, dist=%.3f, yaw_diff=%.3f)',
+                                      phase, stuck_timeout, dist, yaw_diff)
+                        self.move_base_client.cancel_goal()
+                        break
             last_x, last_y, last_yaw = rx, ry, ryaw
 
             rospy.sleep(check_interval)
@@ -787,7 +793,8 @@ class MissionStateMachine(object):
         self.move_base_client.cancel_goal()
         self._stop_robot()
 
-        text = self.voice_cfg['voice_text'].get('task_skip', u'跳过')
+        text = self.voice_cfg['voice_text'].get('task_skip', u'跳过').format(target_cell=self.target_cell)
+        self._speak(text)
         rospy.loginfo('[Mission] Phase %d: Task cell %d skipped (%d/%d skips used)',
                       phase, self.target_cell, self.task_skip_count,
                       self.mission_cfg['timeouts'].get('max_task_skips', 1))
@@ -979,7 +986,7 @@ class MissionStateMachine(object):
             twist.angular.z = 1.0 if math.sin(target_heading - ryaw) > 0 else -1.0
             rotate_duration = min(yaw_err / 1.0, 2.0)
             t0 = time.time()
-            while time.time() - t0 < rotate_duration:
+            while time.time() - t0 < rotate_duration and not rospy.is_shutdown() and not self._check_aborted():
                 self.cmd_vel_pub.publish(twist)
                 rospy.sleep(0.05)
             self._stop_robot()
@@ -990,7 +997,7 @@ class MissionStateMachine(object):
         twist.linear.x = 0.10  # 0.10 m/s, 极慢速度最小化打滑
         drive_duration = max(0.5, min(dist / 0.10, 3.0))
         t0 = time.time()
-        while time.time() - t0 < drive_duration:
+        while time.time() - t0 < drive_duration and not rospy.is_shutdown() and not self._check_aborted():
             self.cmd_vel_pub.publish(twist)
             rospy.sleep(0.05)
         self._stop_robot()
@@ -1017,6 +1024,33 @@ class MissionStateMachine(object):
     def _stop_robot(self):
         """确保机器人完全停止。"""
         self.cmd_vel_pub.publish(Twist())
+
+    def _convergence_rotate(self):
+        """冷启动收敛旋转：帮助 AMCL 粒子群快速收敛 (~5s)。
+
+        原地旋转 ±90° 产生多方向激光配准数据，加速 KLD 采样收敛。
+        仅实机模式执行（sim_mode=false），仿真跳过。
+        """
+        rospy.loginfo('[Mission] AMCL convergence rotate: starting (~5s)')
+        twist = Twist()
+
+        # 第一阶段: 正转 ~90° (约 2s @ 0.8 rad/s = ~92°)
+        twist.angular.z = 0.8
+        t0 = time.time()
+        while time.time() - t0 < 2.0 and not rospy.is_shutdown() and not self._check_aborted():
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.05)
+
+        # 第二阶段: 反转 ~90° (约 2s)，回到大致初始朝向
+        twist.angular.z = -0.8
+        t0 = time.time()
+        while time.time() - t0 < 2.0 and not rospy.is_shutdown() and not self._check_aborted():
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.05)
+
+        self._stop_robot()
+        rospy.sleep(0.5)  # 停稳
+        rospy.loginfo('[Mission] AMCL convergence rotate: done')
 
     def _send_nav_goal(self, x, y, yaw=0.0):
         """通过 move_base actionlib 发送导航目标。"""
@@ -1133,6 +1167,8 @@ class MissionStateMachine(object):
             return
         rospy.loginfo('[Mission] Perception retry %d/%d, re-navigating to vision position',
                       self.perception_retry_count, max_retries)
+        text = self.voice_cfg['voice_text']['task_image_failed']
+        self._speak(text)
         self.recognition_in_progress = False
         self.vision_result_event.clear()
         self.transition(MissionState.task_image_state(phase, 'SEARCH_TASK_IMAGE'))

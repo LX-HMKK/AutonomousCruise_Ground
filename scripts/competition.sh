@@ -418,7 +418,7 @@ sleep 2
 echo '[3.6] 发送初始位姿...'
 sleep 1
 rostopic pub -1 /initialpose geometry_msgs/PoseWithCovarianceStamped \
-    "{header: {frame_id: map}, pose: {pose: {position: {x: -1.5, y: 1.5, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.068]}}" \
+    "{header: {frame_id: map}, pose: {pose: {position: {x: -1.5, y: 1.5, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.017]}}" \
     > /tmp/comp_initpose.log 2>&1 || true
 # 短等 AMCL（amcl_tf_bridge 已用初始位姿引导 map→odom，AMCL 收敛可异步）
 sleep 3

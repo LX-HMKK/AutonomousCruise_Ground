@@ -18,10 +18,10 @@ from nav_msgs.msg import Odometry
 
 class CovInflate(object):
     def __init__(self):
-        # 前进方向 (xx)：轮子滚动可信度高，小幅放大
-        self.fwd_factor = rospy.get_param('~forward_factor', 5.0)
-        # 横移+旋转 (yy, yawyaw)：小辊子侧滑，大幅降权
-        self.lat_factor = rospy.get_param('~lateral_factor', 20.0)
+        # 前进方向 (xx)：轮子滚动可信度中等，适度降权
+        self.fwd_factor = rospy.get_param('~forward_factor', 10.0)
+        # 横移+旋转 (yy, yawyaw)：小辊子侧滑，极度降权
+        self.lat_factor = rospy.get_param('~lateral_factor', 35.0)
 
         # 6 维度的缩放因子: (x, y, z, roll, pitch, yaw)
         # z/roll/pitch 在 2D EKF 中不使用，设为 1.0 (不缩放)
