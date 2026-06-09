@@ -58,7 +58,7 @@ DWAPlannerROS:
   max_vel_trans: 0.55         # 实际平移限幅
   min_vel_trans: 0.02
   max_vel_theta: 4.0          # 最大旋转速度 (rad/s), ≈229°/s 窄空间快速调整
-  min_vel_theta: 0.10         # 最小旋转速度: 禁止极慢旋转，避免 DWA 犹豫
+  min_vel_theta: 0.01         # 最小旋转速度，极致慢旋
   # -- 加速度 --
   acc_lim_x: 2.5              # 前向加速度 (m/s²)
   acc_lim_y: 2.5              # 横移加速度
@@ -76,7 +76,7 @@ DWAPlannerROS:
   # -- 代价权重 --
   path_distance_bias: 12.0    # 适度降低路径跟随（15→12），允许绕障偏离
   goal_distance_bias: 32.0    # 轻度降低目标引力（35→32），给绕障留空间
-  occdist_scale: 0.12         # 增强避障（0.08→0.12），拐弯时保持安全间距
+  occdist_scale: 0.10         # 避障权重，贴墙时仍可旋转
   # -- 其他 --
   forward_point_distance: 0.325
   stop_time_buffer: 0.2       # 碰撞前停车缓冲 (s)

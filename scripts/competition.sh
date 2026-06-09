@@ -12,8 +12,8 @@
 #   节点: 同上但不启动 GameStart, 状态机 5s 后自动进入流程
 #
 # SSH 启动: 自动检测 SSH_TTY，使用 setsid 后台模式替代 GNOME 终端
-#   用法: ssh abot@IP 'bash ~/abot_dev_ws/scripts/competition.sh competition_field true'
-#   停止: ssh abot@IP 'bash ~/abot_dev_ws/scripts/competition.sh --stop'
+#   用法: ssh abot@IP 'bash ~/PN8RSR/scripts/competition.sh competition_field true'
+#   停止: ssh abot@IP 'bash ~/PN8RSR/scripts/competition.sh --stop'
 #
 # 数据流:
 #   game_node --/start--> mission_state_machine  (仅模式1)
@@ -28,7 +28,7 @@
 #   - SSH 模式: 内层 setsid 脚本自带 trap，外层可通过 PID 文件精准停止
 # ============================================
 
-WS_PATH="${HOME}/abot_dev_ws"
+WS_PATH="${HOME}/PN8RSR"
 PIDFILE=/tmp/abot_competition.pid
 INNER_SCRIPT=/tmp/abot_competition_inner.sh
 
@@ -561,11 +561,11 @@ else
             $READY_HELPERS
             wait_master
             wait_topic /mission_heartbeat 30
-            rosrun robot_slam doubao_asr.py &
+            rosrun robot_slam doubao_tts.py &
             sleep 2
             roslaunch abot_vlm vlm_node.launch &
             sleep 2
-            rosrun robot_slam doubao_tts.py &
+            rosrun robot_slam doubao_asr.py &
             exec bash" &
     else
         gnome-terminal -- bash -c "
@@ -609,5 +609,7 @@ else
     echo "或 Ctrl+C 触发全局清理"
     [ "${SIM_MODE}" = "false" ] && echo "说出'开始比赛'启动..." || echo "模式3: 5s 后自动开始"
 
-    wait
+    echo "按 Enter 停止所有节点..."
+    read _line
+    cleanup_all
 fi
