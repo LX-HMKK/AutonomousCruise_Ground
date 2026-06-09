@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### [1.2.0] - 2026-06-09
+
+#### Changed
+- **语音播报文案全面优化**：9 条播报文本重写，语义更清晰自然
+- **关键节点 TTS 阻塞等待**：`_speak()` 新增 `wait` 参数，到达/识别完成/跳过/终点 4 处等播完再执行下一步
+- **DWA 导航参数调优**：`xy_goal_tolerance` 0.12→0.06、`yaw_goal_tolerance` 0.20→0.30、`min_vel_theta` 0.05→0.01、`occdist_scale` 0.08→0.10、`inflation_radius` 0.04→0.08
+- **里程计协方差拆分**：`cov_inflate` 拆出独立 `yaw_factor` 参数，平移×999/EKF 无视、旋转×35/EKF 不信任（IMU 主导）
+- **任务/终点容差对齐**：`task_center_tolerance_m` 0.04→0.08、`finish_xy_tolerance_m` 0.12→0.08
+- **比赛超时延长**：`max_time_s` 240→600s
+- **工作空间重命名**：`abot_dev_ws` → `PN8RSR`
+
+#### Fixed
+- **GNOME 分支秒关**：`wait` 改为 `read` 阻塞，解决 `gnome-terminal` 退出后主脚本立即清理的问题
+- **模式 1 无提示音**：GNOME 窗口 5 启动顺序改为 TTS→VLM→ASR，确保播报时 TTS 已就绪
+- **`task_skip`/`task_image_failed` 补全播报**：原来只记日志不发声，现已激活
+
 ## [1.1.0] - 2026-06-08
 
 ### Added
