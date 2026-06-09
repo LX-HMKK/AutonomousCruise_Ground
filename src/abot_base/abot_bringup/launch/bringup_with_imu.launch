@@ -22,10 +22,8 @@
         <param name="publish_tf" value="false" />
     </node>
 
-    <!-- 协方差放大: 轮式里程计打滑 → 降权, 让 EKF 更依赖 IMU -->
-    <node pkg="abot_bringup" type="cov_inflate.py" name="cov_inflate" output="screen">
-        <param name="factor" value="5.0" />
-    </node>
+    <!-- 协方差放大: 平移 999x 忽略轮式，旋转 1x 信任轮式 -->
+    <node pkg="abot_bringup" type="cov_inflate.py" name="cov_inflate" output="screen"/>
 
    <node pkg="robot_pose_ekf" type="robot_pose_ekf" name="robot_pose_ekf" output="screen">
         <param name="output_frame" value="odom" />
