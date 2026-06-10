@@ -532,6 +532,11 @@ class MissionStateMachine(object):
         # 到达后稳定等待，确保机器人完全停稳再拍照（避免运动模糊）
         stabilize_s = self.mission_cfg.get('waits', {}).get('arrival_stabilize_s', 1.0)
         rospy.sleep(stabilize_s)
+        # 旋转修正: DWA yaw 精度不够，用 move_base 原地旋转 goal（有避障）
+        if self.last_nav_goal is not None:
+            self._correct_vision_yaw(phase, self.last_nav_goal[2])
+        if self._check_aborted():
+            return
         self.transition(MissionState.task_image_state(phase, 'RECOGNIZE_TASK_IMAGE'))
 
     def _handle_recognize_task_image(self, phase):
@@ -1063,6 +1068,41 @@ class MissionStateMachine(object):
         self._stop_robot()
         rospy.sleep(0.5)  # 停稳
         rospy.loginfo('[Mission] AMCL convergence rotate: done')
+
+    def _correct_vision_yaw(self, phase, target_yaw):
+        """视觉点旋转修正：用 move_base 原地旋转（有避障），精度不够重复发。
+        最多重试 3 次，每次 timeout 3s，避免无限转。
+        """
+        vision_yaw_tol = self.mission_cfg.get('navigation', {}).get('vision_yaw_tolerance_rad', 0.12)
+        max_retries = 3
+
+        for attempt in range(max_retries):
+            rx, ry, ryaw = self._get_current_pose()
+            if rx is None:
+                return
+            yaw_err = self._angle_diff(ryaw, target_yaw)
+            if yaw_err <= vision_yaw_tol:
+                rospy.loginfo('[Mission] Phase %d: Vision yaw OK (err=%.2f rad)', phase, yaw_err)
+                return
+
+            rospy.loginfo('[Mission] Phase %d: Vision yaw correction %d/%d (err=%.2f rad, %.1f°)',
+                          phase, attempt + 1, max_retries, yaw_err, math.degrees(yaw_err))
+
+            # 原地旋转 goal: 保持当前位置，只转 yaw
+            self._send_nav_goal(rx, ry, target_yaw)
+            t0 = time.time()
+            while time.time() - t0 < 3.0 and not rospy.is_shutdown() and not self._check_aborted():
+                state = self.move_base_client.get_state()
+                if state == GoalStatus.SUCCEEDED:
+                    break
+                rospy.sleep(0.1)
+            self.move_base_client.cancel_goal()
+            rospy.sleep(0.3)
+
+        rx, ry, ryaw = self._get_current_pose()
+        final_err = self._angle_diff(ryaw, target_yaw) if rx is not None else float('inf')
+        rospy.loginfo('[Mission] Phase %d: Vision yaw correction done (final_err=%.2f rad)',
+                      phase, final_err)
 
     def _send_nav_goal(self, x, y, yaw=0.0):
         """通过 move_base actionlib 发送导航目标。"""
