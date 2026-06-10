@@ -63,7 +63,7 @@ class DoubaoASRFlashTest(unittest.TestCase):
         sys.modules['std_msgs.msg'] = std_msgs_msg
 
         api_key = types.ModuleType('API_KEY_DOUBAO')
-        api_key.SPEECH_APPID = '5728482904'
+        api_key.SPEECH_APPID = '******'
         api_key.SPEECH_TOKEN = 'test-token'
         api_key.SPEECH_ASR_RESOURCE_ID = 'Speech_Recognition_Seed_AUC2000000786212863330'
         sys.modules['API_KEY_DOUBAO'] = api_key
@@ -101,7 +101,7 @@ class DoubaoASRFlashTest(unittest.TestCase):
         self.assertEqual(
             captured['url'],
             'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash')
-        self.assertEqual(captured['headers']['X-Api-App-Key'], '5728482904')
+        self.assertEqual(captured['headers']['X-Api-App-Key'], '******')
         self.assertEqual(captured['headers']['X-Api-Access-Key'], 'test-token')
         self.assertEqual(captured['headers']['X-Api-Resource-Id'], 'Speech_Recognition_Seed_AUC2000000786212863330')
         self.assertEqual(captured['headers']['X-Api-Sequence'], '-1')
