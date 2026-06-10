@@ -1,6 +1,6 @@
 # 自主巡航 — 地面巡航场景
 
-[![Release](https://img.shields.io/badge/release-v1.2.0-blue)](https://github.com/LX-HMKK/AutonomousCruise_Ground/releases/tag/v1.1.0)
+[![Release](https://img.shields.io/badge/release-v1.2.0-blue)](https://github.com/LX-HMKK/AutonomousCruise_Ground/releases/tag/v1.2.0)
 [![ROS](https://img.shields.io/badge/ROS-Melodic-green)](https://www.ros.org/)
 [![Python](https://img.shields.io/badge/Python-2.7%20%7C%203.9-yellow)](https://www.python.org/)
 

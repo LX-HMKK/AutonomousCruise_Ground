@@ -9,16 +9,24 @@
 #### Changed
 - **语音播报文案全面优化**：9 条播报文本重写，语义更清晰自然
 - **关键节点 TTS 阻塞等待**：`_speak()` 新增 `wait` 参数，到达/识别完成/跳过/终点 4 处等播完再执行下一步
-- **DWA 导航参数调优**：`xy_goal_tolerance` 0.12→0.06、`yaw_goal_tolerance` 0.20→0.30、`min_vel_theta` 0.05→0.01、`occdist_scale` 0.08→0.10、`inflation_radius` 0.04→0.08
-- **里程计协方差拆分**：`cov_inflate` 拆出独立 `yaw_factor` 参数，平移×999/EKF 无视、旋转×35/EKF 不信任（IMU 主导）
+- **视觉点 yaw 精准修正**：`_correct_vision_yaw()` 利用 move_base 原地旋转目标，最多 3 次重试，替换不安全的纯 cmd_vel 方案
+- **DWA 导航参数全面调优**：`occdist_scale` 0.08→0.10（防贴墙转不动）、`path_distance_bias` 20→12（允许绕障偏离）、`goal_distance_bias` 32→32（保持目标引力）、`xy_goal_tolerance` 0.12→0.06、`yaw_goal_tolerance` 0.20→0.30（状态机自己精准控制末段）、`min_vel_theta` 0.05（旋转果断）、`sim_time` 1.2→1.5
+- **local_costmap 膨胀半径加大**：`inflation_radius` 0.04→0.10，配合 `cost_scaling_factor` 8.0，防直行蹭墙
+- **里程计协方差拆分**：`cov_inflate` 拆出独立 `yaw_factor` 参数，前进×10、横移×35、旋转×35（IMU 主导偏航）
 - **任务/终点容差对齐**：`task_center_tolerance_m` 0.04→0.08、`finish_xy_tolerance_m` 0.12→0.08
 - **比赛超时延长**：`max_time_s` 240→600s
 - **工作空间重命名**：`abot_dev_ws` → `PN8RSR`
 
 #### Fixed
+- **视觉点贴墙转不动**：`occdist_scale=0.30` 时 DWA 旋转轨迹全部被障碍代价拒绝，降至 0.10 解决
+- **直行蹭墙**：local_costmap `inflation_radius` 0.04 过小导致 DWA 不避让近墙轨迹，加大到 0.10
+- **东墙视觉点偏移回退**：`offset_m` 0.50→0.35，与其他三墙保持一致
 - **GNOME 分支秒关**：`wait` 改为 `read` 阻塞，解决 `gnome-terminal` 退出后主脚本立即清理的问题
 - **模式 1 无提示音**：GNOME 窗口 5 启动顺序改为 TTS→VLM→ASR，确保播报时 TTS 已就绪
 - **`task_skip`/`task_image_failed` 补全播报**：原来只记日志不发声，现已激活
+
+#### Security
+- **API 密钥脱敏**：`API_KEY_DOUBAO.py` 中豆包/火山引擎密钥及 `API_KEY.py` 中 YI_KEY 替换为 `******`
 
 ## [1.1.0] - 2026-06-08
 
